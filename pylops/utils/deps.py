@@ -1,8 +1,327 @@
-import os
-from importlib import util
+__all__ = [
+    "cupy_enabled",
+    "jax_enabled",
+    "astra_enabled",
+    "curvelets_enabled",
+    "devito_enabled",
+    "dtcwt_enabled",
+    "mkl_fft_enabled",
+    "numba_enabled",
+    "pyfftw_enabled",
+    "pytensor_enabled",
+    "pywt_enabled",
+    "skfmm_enabled",
+    "spgl1_enabled",
+    "sympy_enabled",
+    "torch_enabled",
+]
 
+import os
+from importlib import import_module, util
+
+
+# error message at import of available package
+def cupy_import(message: str | None = None) -> str | None:
+    # detect if cupy is available and the user is expecting to be used
+    cupy_test = (
+        util.find_spec("cupy") is not None and int(os.getenv("CUPY_PYLOPS", 1)) == 1
+    )
+    # if cupy should be importable
+    if cupy_test:
+        # try importing it
+        try:
+            import_module("cupy")  # noqa: F401
+
+            # if successful set the message to None.
+            cupy_message = None
+        # if unable to import but the package is installed
+        except (ImportError, ModuleNotFoundError) as e:
+            cupy_message = (
+                f"Failed to import cupy, Falling back to CPU (error: {e}). "
+                "Please ensure your CUDA environment is set up correctly "
+                "for more details visit 'https://docs.cupy.dev/en/stable/install.html'"
+            )
+            print(UserWarning(cupy_message))
+    # if cupy_test is False, it means not installed or environment variable set to 0
+    else:
+        cupy_message = (
+            "Cupy package not installed or os.getenv('CUPY_PYLOPS') == 0. "
+            f"In order to be able to use {message} "
+            "ensure 'os.getenv('CUPY_PYLOPS') == 1' and run "
+            "'pip install cupy'; "
+            "for more details visit 'https://docs.cupy.dev/en/stable/install.html'"
+        )
+
+    return cupy_message
+
+
+def jax_import(message: str | None = None) -> str | None:
+    jax_test = (
+        util.find_spec("jax") is not None and int(os.getenv("JAX_PYLOPS", 1)) == 1
+    )
+    if jax_test:
+        try:
+            import_module("jax")  # noqa: F401
+
+            jax_message = None
+        except (ImportError, ModuleNotFoundError) as e:
+            jax_message = (
+                f"Failed to import jax, Falling back to numpy (error: {e}). "
+                "Please ensure your environment is set up correctly "
+                "for more details visit 'https://jax.readthedocs.io/en/latest/installation.html'"
+            )
+            print(UserWarning(jax_message))
+    else:
+        jax_message = (
+            "Jax package not installed or os.getenv('JAX_PYLOPS') == 0. "
+            f"In order to be able to use {message} "
+            "ensure 'os.getenv('JAX_PYLOPS') == 1' and run "
+            "'pip install jax'; "
+            "for more details visit 'https://jax.readthedocs.io/en/latest/installation.html'"
+        )
+
+    return jax_message
+
+
+def astra_import(message: str | None = None) -> str | None:
+    if astra_enabled:
+        try:
+            import_module("astra")  # noqa: F401
+
+            astra_message = None
+        except Exception as e:
+            astra_message = f"Failed to import astra (error:{e})."
+    else:
+        astra_message = (
+            f"ASTRA not available. "
+            f"In order to be able to use "
+            f'{message} run "pip install astra-toolbox" or '
+            f'"conda install -c astra-toolbox astra-toolbox".'
+        )
+    return astra_message
+
+
+def udct_import(message: str | None = None) -> str | None:
+    if curvelets_enabled:
+        try:
+            import_module("curvelets")  # noqa: F401
+
+            curvelets_message = None
+        except Exception as e:
+            curvelets_message = f"Failed to import curvelets (error:{e})."
+    else:
+        curvelets_message = (
+            f"Curvelets not available. "
+            f"In order to be able to use "
+            f'{message} run "pip install curvelets".'
+        )
+    return curvelets_message
+
+
+def devito_import(message: str | None = None) -> str | None:
+    if devito_enabled:
+        try:
+            import_module("devito")  # noqa: F401
+
+            devito_message = None
+        except Exception as e:
+            devito_message = f"Failed to import devito (error:{e})."
+    else:
+        devito_message = (
+            f"Devito not available. "
+            f"In order to be able to use "
+            f'{message} run "pip install devito".'
+        )
+    return devito_message
+
+
+def dtcwt_import(message: str | None = None) -> str | None:
+    if dtcwt_enabled:
+        try:
+            import_module("dtcwt")  # noqa: F401
+
+            dtcwt_message = None
+        except Exception as e:
+            dtcwt_message = f"Failed to import dtcwt (error:{e})."
+    else:
+        dtcwt_message = (
+            f"Dtcwt not available. "
+            f"In order to be able to use "
+            f'{message} run "pip install dtcwt".'
+        )
+    return dtcwt_message
+
+
+def numba_import(message: str | None = None) -> str | None:
+    if numba_enabled:
+        try:
+            import_module("numba")  # noqa: F401
+
+            numba_message = None
+        except Exception as e:
+            numba_message = f"Failed to import numba (error:{e}), use numpy."
+    else:
+        numba_message = (
+            "Numba not available, reverting to numpy. "
+            "In order to be able to use "
+            f"{message} run "
+            f'"pip install numba" or '
+            f'"conda install numba".'
+        )
+    return numba_message
+
+
+def pyfftw_import(message: str | None = None) -> str | None:
+    if pyfftw_enabled:
+        try:
+            import_module("pyfftw")  # noqa: F401
+
+            pyfftw_message = None
+        except Exception as e:
+            pyfftw_message = f"Failed to import pyfftw (error:{e}), use numpy."
+    else:
+        pyfftw_message = (
+            "Pyfftw not available, reverting to numpy. "
+            "In order to be able to use "
+            f"{message} run "
+            f'"pip install pyFFTW" or '
+            f'"conda install -c conda-forge pyfftw".'
+        )
+    return pyfftw_message
+
+
+def pywt_import(message: str | None = None) -> str | None:
+    if pywt_enabled:
+        try:
+            import_module("pywt")  # noqa: F401
+
+            pywt_message = None
+        except Exception as e:
+            pywt_message = f"Failed to import pywt (error:{e})."
+    else:
+        pywt_message = (
+            "Pywt not available. "
+            "In order to be able to use "
+            f"{message} run "
+            f'"pip install PyWavelets" or '
+            f'"conda install pywavelets".'
+        )
+    return pywt_message
+
+
+def skfmm_import(message: str | None = None) -> str | None:
+    if skfmm_enabled:
+        try:
+            import_module("skfmm")  # noqa: F401
+
+            skfmm_message = None
+        except Exception as e:
+            skfmm_message = f"Failed to import skfmm (error:{e})."
+    else:
+        skfmm_message = (
+            f"Skfmm package not installed. In order to be able to use "
+            f"{message} run "
+            f'"pip install scikit-fmm" or '
+            f'"conda install -c conda-forge scikit-fmm".'
+        )
+    return skfmm_message
+
+
+def spgl1_import(message: str | None = None) -> str | None:
+    if spgl1_enabled:
+        try:
+            import_module("spgl1")  # noqa: F401
+
+            spgl1_message = None
+        except Exception as e:
+            spgl1_message = f"Failed to import spgl1 (error:{e})."
+    else:
+        spgl1_message = (
+            f"Spgl1 package not installed. In order to be able to use "
+            f"{message} run "
+            f'"pip install spgl1".'
+        )
+    return spgl1_message
+
+
+def sympy_import(message: str | None = None) -> str | None:
+    if sympy_enabled:
+        try:
+            import_module("sympy")  # noqa: F401
+
+            sympy_message = None
+        except Exception as e:
+            sympy_message = f"Failed to import sympy (error:{e})."
+    else:
+        sympy_message = (
+            f"Sympy package not installed. In order to be able to use "
+            f"{message} run "
+            f'"pip install sympy".'
+        )
+    return sympy_message
+
+
+def pytensor_import(message: str | None = None) -> str | None:
+    if pytensor_enabled:
+        try:
+            import_module("pytensor")  # noqa: F401
+
+            pytensor_message = None
+        except Exception as e:
+            pytensor_message = f"Failed to import pytensor (error:{e})."
+    else:
+        pytensor_message = (
+            f"pytensor package not installed. In order to be able to use "
+            f"{message} run "
+            f'"pip install pytensor" or "conda install -c conda-forge pytensor".'
+        )
+    return pytensor_message
+
+
+def mkl_fft_import(message: str | None) -> str | None:
+    if mkl_fft_enabled:
+        try:
+            import_module("mkl_fft")  # noqa: F401
+            mkl_fft_message = None
+        except Exception as e:
+            mkl_fft_message = f"Failed to import mkl_fft (error:{e}), use numpy."
+    else:
+        mkl_fft_message = (
+            "mkl_fft not available, reverting to numpy. "
+            "In order to be able to use "
+            f"{message} run "
+            '"pip install --index-url '
+            "https://software.repos.intel.com/python/pypi "
+            '--extra-index-url https://pypi.org/simple mkl_fft" '
+            'or "conda install -c https://software.repos.intel.com/python/conda '
+            '-c conda-forge mkl_fft".'
+        )
+    return mkl_fft_message
+
+
+# Set package availability booleans
+# cupy and jax: the package is imported to check everything is working correctly,
+# if not the package is disabled. We do this here as these libraries are used as drop-in
+# replacement for many numpy and scipy routines when cupy/jax arrays are provided.
+# all other libraries: we simply check if the package is available and postpone its import
+# to check everything is working correctly when a user tries to create an operator that requires
+# such a package
+cupy_enabled: bool = (
+    True if (cupy_import() is None and int(os.getenv("CUPY_PYLOPS", 1)) == 1) else False
+)
+jax_enabled: bool = (
+    True if (jax_import() is None and int(os.getenv("JAX_PYLOPS", 1)) == 1) else False
+)
+astra_enabled = util.find_spec("astra") is not None
+curvelets_enabled = util.find_spec("curvelets") is not None
+devito_enabled = util.find_spec("devito") is not None
+dtcwt_enabled = util.find_spec("dtcwt") is not None
 numba_enabled = util.find_spec("numba") is not None
-cupy_enabled = util.find_spec("cupy") is not None and \
-               int(os.getenv('CUPY_PYLOPS', 1)) == 1
-cusignal_enabled = util.find_spec("cusignal") is not None and \
-                   int(os.getenv('CUSIGNAL_PYLOPS', 1)) == 1
+pyfftw_enabled = util.find_spec("pyfftw") is not None
+pywt_enabled = util.find_spec("pywt") is not None
+skfmm_enabled = util.find_spec("skfmm") is not None
+spgl1_enabled = util.find_spec("spgl1") is not None
+sympy_enabled = util.find_spec("sympy") is not None
+torch_enabled = util.find_spec("torch") is not None
+pytensor_enabled = util.find_spec("pytensor") is not None
+mkl_fft_enabled = util.find_spec("mkl_fft") is not None

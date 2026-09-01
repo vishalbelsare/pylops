@@ -1,0 +1,113 @@
+__all__ = ["Gradient"]
+
+
+from pylops import LinearOperator
+from pylops.basicoperators import FirstDerivative, VStack
+from pylops.utils._internal import _value_or_sized_to_tuple
+from pylops.utils.typing import DTypeLike, InputDimsLike, NDArray, Tderivkind
+
+
+class Gradient(LinearOperator):
+    r"""Gradient.
+
+    Apply gradient operator to a multi-dimensional array.
+
+    .. note:: At least 2 dimensions are required, use
+      :py:func:`pylops.FirstDerivative` for 1d arrays.
+
+    Parameters
+    ----------
+    dims : :obj:`tuple`
+        Number of samples for each dimension.
+    sampling : :obj:`tuple` or :obj:`float`, optional
+        Sampling steps for each direction. If a single float
+        is provided, it is used for all directions.
+    edge : :obj:`bool`, optional
+        Use reduced order derivative at edges (``True``) or
+        ignore them (``False``).
+    kind : :obj:`str`, optional
+        Derivative kind (``forward``, ``centered``, or ``backward``).
+    dtype : :obj:`str`, optional
+        Type of elements in input array.
+    name : :obj:`str`, optional
+        .. versionadded:: 2.0.0
+
+        Name of operator (to be used by :func:`pylops.utils.describe.describe`)
+
+    Attributes
+    ----------
+    dims : :obj:`tuple`
+        Shape of the array after the adjoint, but before flattening.
+
+        For example, ``x_reshaped = (Op.H * y.ravel()).reshape(Op.dims)``.
+    dimsd : :obj:`tuple`
+        Shape of the array after the forward, but before flattening.
+
+        For example, ``y_reshaped = (Op * x.ravel()).reshape(Op.dimsd)``.
+    shape : :obj:`tuple`
+        Operator shape.
+
+    Notes
+    -----
+    The Gradient operator applies a first-order derivative to each dimension of
+    a multi-dimensional array in forward mode.
+
+    For simplicity, given a three dimensional array, the Gradient in forward
+    mode using a centered stencil can be expressed as:
+
+    .. math::
+        \mathbf{g}_{i, j, k} =
+            (f_{i+1, j, k} - f_{i-1, j, k}) / d_1 \mathbf{i_1} +
+            (f_{i, j+1, k} - f_{i, j-1, k}) / d_2 \mathbf{i_2} +
+            (f_{i, j, k+1} - f_{i, j, k-1}) / d_3 \mathbf{i_3}
+
+    which is discretized as follows:
+
+    .. math::
+        \mathbf{g}  =
+        \begin{bmatrix}
+           \mathbf{df_1} \\
+           \mathbf{df_2} \\
+           \mathbf{df_3}
+        \end{bmatrix}
+
+    In adjoint mode, the adjoints of the first derivatives along different
+    axes are instead summed together.
+
+    """
+
+    def __init__(
+        self,
+        dims: int | InputDimsLike,
+        sampling: float | InputDimsLike = 1.0,
+        edge: bool = False,
+        kind: Tderivkind = "centered",
+        dtype: DTypeLike = "float64",
+        name: str = "G",
+    ):
+        dims = _value_or_sized_to_tuple(dims)
+        ndims = len(dims)
+        sampling = _value_or_sized_to_tuple(sampling, repeat=ndims)
+        self.sampling = sampling
+        self.edge = edge
+        self.kind = kind
+        Op = VStack(
+            [
+                FirstDerivative(
+                    dims=dims,
+                    axis=iax,
+                    sampling=sampling[iax],
+                    edge=edge,
+                    kind=kind,
+                    dtype=dtype,
+                )
+                for iax in range(ndims)
+            ]
+        )
+        super().__init__(Op=Op, dims=dims, dimsd=(ndims, *dims), name=name)
+
+    def _matvec(self, x: NDArray) -> NDArray:
+        return super()._matvec(x)
+
+    def _rmatvec(self, x: NDArray) -> NDArray:
+        return super()._rmatvec(x)

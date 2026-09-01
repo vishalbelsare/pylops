@@ -1,22 +1,42 @@
+import os
+
+if int(os.environ.get("TEST_CUPY_PYLOPS", 0)):
+    import cupy as np
+    from cupy.testing import assert_array_almost_equal
+    from cupyx.scipy.sparse import random as sp_random
+
+    backend = "cupy"
+else:
+    import numpy as np
+    from numpy.testing import assert_array_almost_equal
+    from scipy.sparse import random as sp_random
+
+    backend = "numpy"
 import pytest
 
-import numpy as np
-from numpy.testing import assert_array_almost_equal
-from scipy.sparse import random as sp_random
-from scipy.sparse.linalg import lsqr
-
+from pylops.basicoperators import (
+    Block,
+    BlockDiag,
+    HStack,
+    MatrixMult,
+    Real,
+    VStack,
+    Zero,
+)
+from pylops.optimization.basic import lsqr
 from pylops.utils import dottest
-from pylops.basicoperators import MatrixMult, VStack, \
-    HStack, Block, BlockDiag, Real
 
-par1 = {'ny': 101, 'nx': 101,
-        'imag': 0, 'dtype':'float64'}  # square real
-par2 = {'ny': 301, 'nx': 101,
-        'imag': 0, 'dtype':'float64'}  # overdetermined real
-par1j = {'ny': 101, 'nx': 101,
-         'imag': 1j, 'dtype':'complex128'} # square imag
-par2j = {'ny': 301, 'nx': 101,
-         'imag': 1j, 'dtype':'complex128'} # overdetermined imag
+par1 = {"ny": 101, "nx": 101, "imag": 0, "dtype": "float64"}  # square real
+par2 = {"ny": 301, "nx": 101, "imag": 0, "dtype": "float64"}  # overdetermined real
+par1s = {"ny": 101, "nx": 101, "imag": 0, "dtype": "float32"}  # square real (fp32)
+par2s = {
+    "ny": 301,
+    "nx": 101,
+    "imag": 0,
+    "dtype": "float32",
+}  # overdetermined real (fp32)
+par1j = {"ny": 101, "nx": 101, "imag": 1j, "dtype": "complex128"}  # square imag
+par2j = {"ny": 301, "nx": 101, "imag": 1j, "dtype": "complex128"}  # overdetermined imag
 
 
 @pytest.mark.parametrize("par", [(par1)])
@@ -24,332 +44,639 @@ def test_VStack_incosistent_columns(par):
     """Check error is raised if operators with different number of columns
     are passed to VStack
     """
-    G1 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    G2 = np.random.normal(0, 10, (par['ny'], par['nx'] + 1)).astype(par['dtype'])
-    with pytest.raises(ValueError):
-        VStack([MatrixMult(G1, dtype=par['dtype']),
-                MatrixMult(G2, dtype=par['dtype'])],
-               dtype=par['dtype'])
+    G1 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(par["dtype"])
+    G2 = np.random.normal(0, 10, (par["ny"], par["nx"] + 1)).astype(par["dtype"])
+    with pytest.raises(ValueError, match="different number of columns"):
+        VStack(
+            [MatrixMult(G1, dtype=par["dtype"]), MatrixMult(G2, dtype=par["dtype"])],
+            dtype=par["dtype"],
+        )
 
 
 @pytest.mark.parametrize("par", [(par1)])
-def test_HStack_incosistent_columns(par):
+def test_HStack_incosistent_rows(par):
     """Check error is raised if operators with different number of rows
-    are passed to VStack
+    are passed to HStack
     """
-    G1 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    G2 = np.random.normal(0, 10, (par['ny'] + 1, par['nx'])).astype(par['dtype'])
-    with pytest.raises(ValueError):
-        HStack([MatrixMult(G1, dtype=par['dtype']),
-                MatrixMult(G2, dtype=par['dtype'])],
-               dtype=par['dtype'])
+    G1 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(par["dtype"])
+    G2 = np.random.normal(0, 10, (par["ny"] + 1, par["nx"])).astype(par["dtype"])
+    with pytest.raises(ValueError, match="different number of rows"):
+        HStack(
+            [MatrixMult(G1, dtype=par["dtype"]), MatrixMult(G2, dtype=par["dtype"])],
+            dtype=par["dtype"],
+        )
 
 
-@pytest.mark.parametrize("par", [(par1), (par2), (par1j), (par2j)])
+@pytest.mark.parametrize("par", [(par1), (par2), (par1s), (par2s), (par1j), (par2j)])
 def test_VStack(par):
-    """Dot-test and inversion for VStack operator
-    """
+    """Dot-test and inversion for VStack operator"""
     np.random.seed(0)
-    G1 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    G2 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    x = np.ones(par['nx']) + par['imag']*np.ones(par['nx'])
+    dtype = np.empty(0, dtype=par["dtype"]).real.dtype
 
-    Vop = VStack([MatrixMult(G1, dtype=par['dtype']),
-                  MatrixMult(G2, dtype=par['dtype'])],
-                 dtype=par['dtype'])
-    assert dottest(Vop, 2*par['ny'], par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    G1 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype) + par[
+        "imag"
+    ] * np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype)
+    G2 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype) + par[
+        "imag"
+    ] * np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype)
+    x = np.ones(par["nx"], dtype=dtype) + par["imag"] * np.ones(par["nx"], dtype=dtype)
 
-    xlsqr = lsqr(Vop, Vop * x, damp=1e-20, iter_lim=300, show=0)[0]
+    Vop = VStack(
+        [MatrixMult(G1, dtype=par["dtype"]), MatrixMult(G2, dtype=par["dtype"])],
+        dtype=par["dtype"],
+    )
+    assert dottest(
+        Vop,
+        2 * par["ny"],
+        par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = Vop * x
+    xadj = Vop.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
+
+    xlsqr = lsqr(
+        Vop,
+        Vop * x,
+        x0=np.zeros_like(x).ravel(),
+        damp=1e-20,
+        niter=300,
+        atol=1e-8,
+        btol=1e-8,
+        show=0,
+    )[0]
     assert_array_almost_equal(x, xlsqr, decimal=4)
 
     # use numpy matrix directly in the definition of the operator
-    V1op = VStack([G1, MatrixMult(G2, dtype=par['dtype'])],
-                  dtype=par['dtype'])
-    assert dottest(V1op, 2 * par['ny'], par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    V1op = VStack([G1, MatrixMult(G2, dtype=par["dtype"])], dtype=par["dtype"])
+    assert dottest(
+        V1op,
+        2 * par["ny"],
+        par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = Vop * x
+    xadj = Vop.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
 
     # use scipy matrix directly in the definition of the operator
-    G1 = sp_random(par['ny'], par['nx'], density=0.4).astype('float32')
-    V2op = VStack([G1, MatrixMult(G2, dtype=par['dtype'])],
-                  dtype=par['dtype'])
-    assert dottest(V2op, 2 * par['ny'], par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    G1 = sp_random(par["ny"], par["nx"], density=0.4).astype("float32")
+    V2op = VStack([G1, MatrixMult(G2, dtype=par["dtype"])], dtype=par["dtype"])
+    assert dottest(
+        V2op,
+        2 * par["ny"],
+        par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = Vop * x
+    xadj = Vop.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
+
+    # use Zero operator directly in the definition of the operator
+    G1 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(par["dtype"])
+    V3op = VStack(
+        [
+            MatrixMult(G1, dtype=par["dtype"]),
+            Zero(par["ny"], par["nx"], dtype=par["dtype"]),
+        ],
+        dtype=par["dtype"],
+    )
+    assert dottest(
+        V3op,
+        2 * par["ny"],
+        par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = Vop * x
+    xadj = Vop.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
 
 
-@pytest.mark.parametrize("par", [(par2), (par2j)])
+@pytest.mark.parametrize("par", [(par2), (par2s), (par2j)])
 def test_HStack(par):
-    """Dot-test and inversion for HStack operator with numpy array as input
-    """
+    """Dot-test and inversion for HStack operator with numpy array as input"""
     np.random.seed(0)
-    G1 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype('float32')
-    G2 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype('float32')
-    x = np.ones(2*par['nx']) + par['imag']*np.ones(2*par['nx'])
+    dtype = np.empty(0, dtype=par["dtype"]).real.dtype
 
-    Hop = HStack([G1, MatrixMult(G2, dtype=par['dtype'])],
-                 dtype=par['dtype'])
-    assert dottest(Hop, par['ny'], 2*par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    G1 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype) + par[
+        "imag"
+    ] * np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype)
+    G2 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype) + par[
+        "imag"
+    ] * np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype)
+    x = np.ones(2 * par["nx"], dtype=dtype) + par["imag"] * np.ones(
+        2 * par["nx"], dtype=dtype
+    )
 
-    xlsqr = lsqr(Hop, Hop * x, damp=1e-20, iter_lim=300, show=0)[0]
+    Hop = HStack(
+        [MatrixMult(G1, dtype=par["dtype"]), MatrixMult(G2, dtype=par["dtype"])],
+        dtype=par["dtype"],
+    )
+    assert dottest(
+        Hop,
+        par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = Hop * x
+    xadj = Hop.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
+
+    xlsqr = lsqr(
+        Hop,
+        Hop * x,
+        x0=np.zeros_like(x).ravel(),
+        niter=300,
+        atol=1e-8,
+        btol=1e-8,
+        show=0,
+    )[0]
     assert_array_almost_equal(x, xlsqr, decimal=4)
 
     # use numpy matrix directly in the definition of the operator
-    H1op = HStack([G1, MatrixMult(G2, dtype=par['dtype'])],
-                  dtype=par['dtype'])
-    assert dottest(H1op, par['ny'], 2 * par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    H1op = HStack([G1, MatrixMult(G2, dtype=par["dtype"])], dtype=par["dtype"])
+    assert dottest(
+        H1op,
+        par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = H1op * x
+    xadj = Hop.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
 
     # use scipy matrix directly in the definition of the operator
-    G1 = sp_random(par['ny'], par['nx'], density=0.4).astype('float32')
-    H2op = HStack([G1, MatrixMult(G2, dtype=par['dtype'])],
-                  dtype=par['dtype'])
-    assert dottest(H2op, par['ny'], 2 * par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    G1 = sp_random(par["ny"], par["nx"], density=0.4).astype("float32")
+    H2op = HStack([G1, MatrixMult(G2, dtype=par["dtype"])], dtype=par["dtype"])
+    assert dottest(
+        H2op,
+        par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = H2op * x
+    xadj = H2op.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
+
+    # use Zero operator directly in the definition of the operator
+    G1 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype("float32")
+    H3op = HStack(
+        [
+            MatrixMult(G1, dtype=par["dtype"]),
+            Zero(par["ny"], par["nx"], dtype=par["dtype"]),
+        ],
+        dtype=par["dtype"],
+    )
+    assert dottest(
+        H3op,
+        par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = H3op * x
+    xadj = H3op.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
 
 
-@pytest.mark.parametrize("par", [(par1), (par2), (par1j), (par2j)])
+@pytest.mark.parametrize("par", [(par1), (par2), (par1s), (par2s), (par1j), (par2j)])
 def test_Block(par):
-    """Dot-test and inversion for Block operator
-    """
+    """Dot-test and inversion for Block operator"""
     np.random.seed(0)
-    G11 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    G12 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    G21 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    G22 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
+    dtype = np.empty(0, dtype=par["dtype"]).real.dtype
 
-    x = np.ones(2*par['nx']) + par['imag']*np.ones(2*par['nx'])
+    G11 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype) + par[
+        "imag"
+    ] * np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype)
+    G12 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype) + par[
+        "imag"
+    ] * np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype)
+    G21 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype) + par[
+        "imag"
+    ] * np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype)
+    G22 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype) + par[
+        "imag"
+    ] * np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype)
+    x = np.ones(2 * par["nx"], dtype=dtype) + par["imag"] * np.ones(
+        2 * par["nx"], dtype=dtype
+    )
 
-    Bop = Block([[MatrixMult(G11, dtype=par['dtype']),
-                  MatrixMult(G12, dtype=par['dtype'])],
-                 [MatrixMult(G21, dtype=par['dtype']),
-                  MatrixMult(G22, dtype=par['dtype'])]],
-                dtype=par['dtype'])
-    assert dottest(Bop, 2*par['ny'], 2*par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    Bop = Block(
+        [
+            [MatrixMult(G11, dtype=par["dtype"]), MatrixMult(G12, dtype=par["dtype"])],
+            [MatrixMult(G21, dtype=par["dtype"]), MatrixMult(G22, dtype=par["dtype"])],
+        ],
+        dtype=par["dtype"],
+    )
+    assert dottest(
+        Bop,
+        2 * par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = Bop * x
+    xadj = Bop.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
 
-    xlsqr = lsqr(Bop, Bop * x, damp=1e-20, iter_lim=500, show=0)[0]
+    xlsqr = lsqr(
+        Bop,
+        Bop * x,
+        x0=np.zeros_like(x).ravel(),
+        damp=1e-20,
+        niter=500,
+        atol=1e-8,
+        btol=1e-8,
+        show=0,
+    )[0]
     assert_array_almost_equal(x, xlsqr, decimal=3)
 
     # use numpy matrix directly in the definition of the operator
-    B1op = Block([[G11,
-                   MatrixMult(G12, dtype=par['dtype'])],
-                  [MatrixMult(G21, dtype=par['dtype']),
-                   G22]], dtype=par['dtype'])
-    assert dottest(B1op, 2 * par['ny'], 2 * par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    B1op = Block(
+        [
+            [G11, MatrixMult(G12, dtype=par["dtype"])],
+            [MatrixMult(G21, dtype=par["dtype"]), G22],
+        ],
+        dtype=par["dtype"],
+    )
+    assert dottest(
+        B1op,
+        2 * par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = B1op * x
+    xadj = B1op.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
 
     # use scipy matrix directly in the definition of the operator
-    G11 = sp_random(par['ny'], par['nx'], density=0.4).astype('float32')
-    B2op = Block([[G11,
-                   MatrixMult(G12, dtype=par['dtype'])],
-                  [MatrixMult(G21, dtype=par['dtype']),
-                   G22]], dtype=par['dtype'])
-    assert dottest(B2op, 2 * par['ny'], 2 * par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    G11 = sp_random(par["ny"], par["nx"], density=0.4).astype("float32")
+    B2op = Block(
+        [
+            [G11, MatrixMult(G12, dtype=par["dtype"])],
+            [MatrixMult(G21, dtype=par["dtype"]), G22],
+        ],
+        dtype=par["dtype"],
+    )
+    assert dottest(
+        B2op,
+        2 * par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        backend=backend,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+    )
+    y = B2op * x
+    xadj = B2op.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
+
+    # use Zero operator directly in the definition of the operator
+    G11 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(par["dtype"])
+    B2op = Block(
+        [
+            [
+                MatrixMult(G11, dtype=par["dtype"]),
+                Zero(par["ny"], par["nx"], dtype=par["dtype"]),
+            ],
+            [Zero(par["ny"], par["nx"], dtype=par["dtype"]), G22],
+        ],
+        dtype=par["dtype"],
+    )
+    assert dottest(
+        B2op,
+        2 * par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = B2op * x
+    xadj = B2op.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
 
 
-@pytest.mark.parametrize("par", [(par1), (par2), (par1j), (par2j)])
+@pytest.mark.parametrize("par", [(par1), (par2), (par1s), (par2s), (par1j), (par2j)])
 def test_BlockDiag(par):
-    """Dot-test and inversion for BlockDiag operator
-    """
+    """Dot-test and inversion for BlockDiag operator"""
     np.random.seed(0)
-    G1 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    G2 = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    x = np.ones(2*par['nx']) + par['imag']*np.ones(2*par['nx'])
+    dtype = np.empty(0, dtype=par["dtype"]).real.dtype
 
-    BDop = BlockDiag([MatrixMult(G1, dtype=par['dtype']),
-                      MatrixMult(G2, dtype=par['dtype'])],
-                     dtype=par['dtype'])
-    assert dottest(BDop, 2*par['ny'], 2*par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    G1 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype) + par[
+        "imag"
+    ] * np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype)
+    G2 = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype) + par[
+        "imag"
+    ] * np.random.normal(0, 10, (par["ny"], par["nx"])).astype(dtype)
+    x = np.ones(2 * par["nx"], dtype=dtype) + par["imag"] * np.ones(
+        2 * par["nx"], dtype=dtype
+    )
 
-    xlsqr = lsqr(BDop, BDop * x, damp=1e-20, iter_lim=500, show=0)[0]
+    BDop = BlockDiag(
+        [MatrixMult(G1, dtype=par["dtype"]), MatrixMult(G2, dtype=par["dtype"])],
+        dtype=par["dtype"],
+    )
+    assert dottest(
+        BDop,
+        2 * par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = BDop * x
+    xadj = BDop.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
+
+    xlsqr = lsqr(
+        BDop,
+        BDop * x,
+        x0=np.zeros_like(x).ravel(),
+        damp=1e-20,
+        niter=500,
+        atol=1e-8,
+        btol=1e-8,
+        show=0,
+    )[0]
     assert_array_almost_equal(x, xlsqr, decimal=3)
 
     # use numpy matrix directly in the definition of the operator
-    BD1op = BlockDiag([MatrixMult(G1, dtype=par['dtype']), G2],
-                      dtype=par['dtype'])
-    assert dottest(BD1op, 2 * par['ny'], 2 * par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    BD1op = BlockDiag([MatrixMult(G1, dtype=par["dtype"]), G2], dtype=par["dtype"])
+    assert dottest(
+        BD1op,
+        2 * par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = BD1op * x
+    xadj = BD1op.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
 
     # use scipy matrix directly in the definition of the operator
-    G2 = sp_random(par['ny'], par['nx'], density=0.4).astype('float32')
-    BD2op = BlockDiag([MatrixMult(G1, dtype=par['dtype']), G2],
-                      dtype=par['dtype'])
-    assert dottest(BD2op, 2 * par['ny'], 2 * par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    G2 = sp_random(par["ny"], par["nx"], density=0.4).astype("float32")
+    BD2op = BlockDiag([MatrixMult(G1, dtype=par["dtype"]), G2], dtype=par["dtype"])
+    assert dottest(
+        BD2op,
+        2 * par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        rtol=1e-4 if dtype == np.float32 else 1e-6,
+        backend=backend,
+    )
+    y = BD2op * x
+    xadj = BD2op.H * y
+    assert y.dtype == par["dtype"]
+    assert xadj.dtype == par["dtype"]
 
 
+@pytest.mark.skipif(
+    int(os.environ.get("TEST_CUPY_PYLOPS", 0)) == 1, reason="Not CuPy enabled"
+)
 @pytest.mark.parametrize("par", [(par1), (par2), (par1j), (par2j)])
-def test_VStack_multiproc(par):
-    """Single and multiprocess consistentcy for VStack operator
-    """
-    np.random.seed(0)
-    nproc = 2
-    G = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    x = np.ones(par['nx']) + par['imag']*np.ones(par['nx'])
-    y = np.ones(4*par['ny']) + par['imag']*np.ones(4*par['ny'])
+def test_VStack_multiproc_multithread(par):
+    """Single and multiprocess/multithreading consistentcy for VStack operator"""
+    for parallel_kind in ["multiproc", "multithread"]:
+        np.random.seed(0)
+        nproc = 2
+        G = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(par["dtype"])
+        x = np.ones(par["nx"]) + par["imag"] * np.ones(par["nx"])
+        y = np.ones(4 * par["ny"]) + par["imag"] * np.ones(4 * par["ny"])
 
-    Vop = VStack([MatrixMult(G, dtype=par['dtype'])] * 4,
-                  dtype=par['dtype'])
-    Vmultiop = VStack([MatrixMult(G, dtype=par['dtype'])] * 4, nproc=nproc,
-                       dtype=par['dtype'])
-    assert dottest(Vmultiop, 4 * par['ny'], par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
-    # forward
-    assert_array_almost_equal(Vop * x, Vmultiop * x, decimal=4)
-    # adjoint
-    assert_array_almost_equal(Vop.H * y, Vmultiop.H * y, decimal=4)
+        Vop = VStack([MatrixMult(G, dtype=par["dtype"])] * 4, dtype=par["dtype"])
+        Vmultiop = VStack(
+            [MatrixMult(G, dtype=par["dtype"])] * 4,
+            nproc=nproc,
+            parallel_kind=parallel_kind,
+            dtype=par["dtype"],
+        )
+        assert dottest(
+            Vmultiop,
+            4 * par["ny"],
+            par["nx"],
+            complexflag=0 if par["imag"] == 0 else 3,
+            backend=backend,
+        )
+        # forward
+        assert_array_almost_equal(Vop * x, Vmultiop * x, decimal=4)
+        # adjoint
+        assert_array_almost_equal(Vop.H * y, Vmultiop.H * y, decimal=4)
 
-    # close pool
-    Vmultiop.pool.close()
+        # close pool
+        Vmultiop.close()
 
 
+@pytest.mark.skipif(
+    int(os.environ.get("TEST_CUPY_PYLOPS", 0)) == 1, reason="Not CuPy enabled"
+)
 @pytest.mark.parametrize("par", [(par2), (par2j)])
-def test_HStack_multiproc(par):
-    """Single and multiprocess consistentcy for HStack operator
-    """
-    np.random.seed(0)
-    nproc = 2
-    G = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    x = np.ones(4*par['nx']) + par['imag']*np.ones(4*par['nx'])
-    y = np.ones(par['ny']) + par['imag']*np.ones(par['ny'])
+def test_HStack_multiproc_multithread(par):
+    """Single and multiprocess/multithreading  consistentcy for HStack operator"""
+    for parallel_kind in ["multiproc", "multithread"]:
+        np.random.seed(0)
+        nproc = 2
+        G = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(par["dtype"])
+        x = np.ones(4 * par["nx"]) + par["imag"] * np.ones(4 * par["nx"])
+        y = np.ones(par["ny"]) + par["imag"] * np.ones(par["ny"])
 
-    Hop = HStack([MatrixMult(G, dtype=par['dtype'])] * 4,
-                  dtype=par['dtype'])
-    Hmultiop = HStack([MatrixMult(G, dtype=par['dtype'])] * 4, nproc=nproc,
-                       dtype=par['dtype'])
-    assert dottest(Hmultiop, par['ny'], 4 * par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
-    # forward
-    assert_array_almost_equal(Hop * x, Hmultiop * x, decimal=4)
-    # adjoint
-    assert_array_almost_equal(Hop.H * y, Hmultiop.H * y, decimal=4)
+        Hop = HStack([MatrixMult(G, dtype=par["dtype"])] * 4, dtype=par["dtype"])
+        Hmultiop = HStack(
+            [MatrixMult(G, dtype=par["dtype"])] * 4,
+            nproc=nproc,
+            parallel_kind=parallel_kind,
+            dtype=par["dtype"],
+        )
+        assert dottest(
+            Hmultiop,
+            par["ny"],
+            4 * par["nx"],
+            complexflag=0 if par["imag"] == 0 else 3,
+            backend=backend,
+        )
+        # forward
+        assert_array_almost_equal(Hop * x, Hmultiop * x, decimal=4)
+        # adjoint
+        assert_array_almost_equal(Hop.H * y, Hmultiop.H * y, decimal=4)
 
-    # close pool
-    Hmultiop.pool.close()
+        # close pool
+        Hmultiop.close()
 
 
+@pytest.mark.skipif(
+    int(os.environ.get("TEST_CUPY_PYLOPS", 0)) == 1, reason="Not CuPy enabled"
+)
 @pytest.mark.parametrize("par", [(par1), (par2), (par1j), (par2j)])
-def test_Block_multiproc(par):
-    """Single and multiprocess consistentcy for Block operator
-    """
-    np.random.seed(0)
-    nproc = 2
-    G = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    Gvert = [MatrixMult(G, dtype=par['dtype'])] * 2
-    Ghor = [Gvert] * 4
-    x = np.ones(2*par['nx']) + par['imag']*np.ones(2*par['nx'])
-    y = np.ones(4*par['ny']) + par['imag']*np.ones(4*par['ny'])
+def test_Block_multiproc_multithread(par):
+    """Single and multiprocess/multithreading  consistentcy for Block operator"""
+    for parallel_kind in ["multiproc", "multithread"]:
+        np.random.seed(0)
+        nproc = 2
+        G = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(par["dtype"])
+        Gvert = [MatrixMult(G, dtype=par["dtype"])] * 2
+        Ghor = [Gvert] * 4
+        x = np.ones(2 * par["nx"]) + par["imag"] * np.ones(2 * par["nx"])
+        y = np.ones(4 * par["ny"]) + par["imag"] * np.ones(4 * par["ny"])
 
-    Bop = Block(Ghor, dtype=par['dtype'])
-    Bmultiop = Block(Ghor, nproc=nproc,
-                     dtype=par['dtype'])
-    assert dottest(Bmultiop, 4*par['ny'], 2*par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
-    # forward
-    assert_array_almost_equal(Bop * x, Bmultiop * x, decimal=3)
-    # adjoint
-    assert_array_almost_equal(Bop.H * y, Bmultiop.H * y, decimal=3)
+        Bop = Block(Ghor, dtype=par["dtype"])
+        Bmultiop = Block(
+            Ghor, nproc=nproc, parallel_kind=parallel_kind, dtype=par["dtype"]
+        )
+        assert dottest(
+            Bmultiop,
+            4 * par["ny"],
+            2 * par["nx"],
+            complexflag=0 if par["imag"] == 0 else 3,
+            backend=backend,
+        )
+        # forward
+        assert_array_almost_equal(Bop * x, Bmultiop * x, decimal=3)
+        # adjoint
+        assert_array_almost_equal(Bop.H * y, Bmultiop.H * y, decimal=3)
 
-    # close pool
-    Bmultiop.pool.close()
+        # close pool
+        Bmultiop.Op.close()
 
 
+@pytest.mark.skipif(
+    int(os.environ.get("TEST_CUPY_PYLOPS", 0)) == 1, reason="Not CuPy enabled"
+)
 @pytest.mark.parametrize("par", [(par1), (par2), (par1j), (par2j)])
-def test_BlockDiag_multiproc(par):
-    """Single and multiprocess consistentcy for BlockDiag operator
-    """
-    np.random.seed(0)
-    nproc = 2
-    G = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    x = np.ones(4*par['nx']) + par['imag']*np.ones(4*par['nx'])
-    y = np.ones(4*par['ny']) + par['imag']*np.ones(4*par['ny'])
+def test_BlockDiag_multiproc_multithread(par):
+    """Single and multiprocess/multithreading consistentcy for BlockDiag operator"""
+    for parallel_kind in ["multiproc", "multithread"]:
+        np.random.seed(0)
+        nproc = 2
+        G = np.random.normal(0, 10, (par["ny"], par["nx"])).astype(par["dtype"])
+        x = np.ones(4 * par["nx"]) + par["imag"] * np.ones(4 * par["nx"])
+        y = np.ones(4 * par["ny"]) + par["imag"] * np.ones(4 * par["ny"])
 
-    BDop = BlockDiag([MatrixMult(G, dtype=par['dtype'])] * 4,
-                     dtype=par['dtype'])
-    BDmultiop = BlockDiag([MatrixMult(G, dtype=par['dtype'])] * 4, nproc=nproc,
-                          dtype=par['dtype'])
-    assert dottest(BDmultiop, 4*par['ny'], 4*par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
-    # forward
-    assert_array_almost_equal(BDop * x, BDmultiop * x, decimal=4)
-    # adjoint
-    assert_array_almost_equal(BDop.H * y, BDmultiop.H * y, decimal=4)
+        BDop = BlockDiag([MatrixMult(G, dtype=par["dtype"])] * 4, dtype=par["dtype"])
+        BDmultiop = BlockDiag(
+            [MatrixMult(G, dtype=par["dtype"])] * 4,
+            nproc=nproc,
+            parallel_kind=parallel_kind,
+            dtype=par["dtype"],
+        )
+        assert dottest(
+            BDmultiop,
+            4 * par["ny"],
+            4 * par["nx"],
+            complexflag=0 if par["imag"] == 0 else 3,
+            backend=backend,
+        )
+        # forward
+        assert_array_almost_equal(BDop * x, BDmultiop * x, decimal=4)
+        # adjoint
+        assert_array_almost_equal(BDop.H * y, BDmultiop.H * y, decimal=4)
 
-    # close pool
-    BDmultiop.pool.close()
+        # close pool
+        BDmultiop.close()
 
 
-@pytest.mark.parametrize("par", [(par1), (par2), (par1j), (par2j)])
+@pytest.mark.parametrize("par", [(par1j), (par2j)])
 def test_VStack_rlinear(par):
-    """VStack operator applied to mix of R-linear and C-linear operators
-    """
+    """VStack operator applied to mix of R-linear and C-linear operators"""
     np.random.seed(0)
-    if np.dtype(par['dtype']).kind == 'c':
-        G = ((np.random.normal(0, 10, (par['ny'], par['nx']))
-              + 1j * np.random.normal(0, 10, (par['ny'], par['nx'])))
-             .astype(par['dtype']))
-    else:
-        G = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    Rop = Real(dims=(par['nx'],), dtype=par['dtype'])
+    G = (
+        np.random.normal(0, 10, (par["ny"], par["nx"]))
+        + 1j * np.random.normal(0, 10, (par["ny"], par["nx"]))
+    ).astype(par["dtype"])
+    Rop = Real(dims=(par["nx"],), dtype=par["dtype"])
 
-    VSop = VStack([Rop, MatrixMult(G, dtype=par['dtype'])],
-                   dtype=par['dtype'])
-    assert VSop.clinear == False
-    assert dottest(VSop, par['nx'] + par['ny'], par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    VSop = VStack([Rop, MatrixMult(G, dtype=par["dtype"])], dtype=par["dtype"])
+    assert VSop.clinear is False
+    assert dottest(
+        VSop,
+        par["nx"] + par["ny"],
+        par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        backend=backend,
+    )
     # forward
-    x = np.random.randn(par['nx']) + par['imag']*np.random.randn(par['nx'])
+    x = np.random.randn(par["nx"]) + par["imag"] * np.random.randn(par["nx"])
     expected = np.concatenate([np.real(x), G @ x])
     assert_array_almost_equal(expected, VSop * x, decimal=4)
 
 
-@pytest.mark.parametrize("par", [(par1), (par2), (par1j), (par2j)])
+@pytest.mark.parametrize("par", [(par1j), (par2j)])
 def test_HStack_rlinear(par):
-    """HStack operator applied to mix of R-linear and C-linear operators
-    """
+    """HStack operator applied to mix of R-linear and C-linear operators"""
     np.random.seed(0)
-    if np.dtype(par['dtype']).kind == 'c':
-        G = ((np.random.normal(0, 10, (par['ny'], par['nx']))
-              + 1j * np.random.normal(0, 10, (par['ny'], par['nx'])))
-             .astype(par['dtype']))
-    else:
-        G = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    Rop = Real(dims=(par['ny'],), dtype=par['dtype'])
+    G = (
+        np.random.normal(0, 10, (par["ny"], par["nx"]))
+        + 1j * np.random.normal(0, 10, (par["ny"], par["nx"]))
+    ).astype(par["dtype"])
+    Rop = Real(dims=(par["ny"],), dtype=par["dtype"])
 
-    HSop = HStack([Rop, MatrixMult(G, dtype=par['dtype'])],
-                   dtype=par['dtype'])
-    assert HSop.clinear == False
-    assert dottest(HSop, par['ny'], par['nx'] + par['ny'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    HSop = HStack([Rop, MatrixMult(G, dtype=par["dtype"])], dtype=par["dtype"])
+    assert HSop.clinear is False
+    assert dottest(
+        HSop,
+        par["ny"],
+        par["nx"] + par["ny"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        backend=backend,
+    )
     # forward
-    x = (np.random.randn(par['nx'] + par['ny'])
-         + par['imag']*np.random.randn(par['nx'] + par['ny']))
-    expected = np.sum([np.real(x[:par['ny']]), G @ x[par['ny']:]], axis=0)
+    x = np.random.randn(par["nx"] + par["ny"]) + par["imag"] * np.random.randn(
+        par["nx"] + par["ny"]
+    )
+    expected = np.sum(np.array([np.real(x[: par["ny"]]), G @ x[par["ny"] :]]), axis=0)
     assert_array_almost_equal(expected, HSop * x, decimal=4)
 
 
-@pytest.mark.parametrize("par", [(par1), (par2), (par1j), (par2j)])
+@pytest.mark.parametrize("par", [(par1j), (par2j)])
 def test_BlockDiag_rlinear(par):
-    """BlockDiag operator applied to mix of R-linear and C-linear operators
-    """
+    """BlockDiag operator applied to mix of R-linear and C-linear operators"""
     np.random.seed(0)
-    if np.dtype(par['dtype']).kind == 'c':
-        G = ((np.random.normal(0, 10, (par['ny'], par['nx']))
-              + 1j * np.random.normal(0, 10, (par['ny'], par['nx'])))
-             .astype(par['dtype']))
-    else:
-        G = np.random.normal(0, 10, (par['ny'], par['nx'])).astype(par['dtype'])
-    Rop = Real(dims=(par['nx'],), dtype=par['dtype'])
+    G = (
+        np.random.normal(0, 10, (par["ny"], par["nx"]))
+        + 1j * np.random.normal(0, 10, (par["ny"], par["nx"]))
+    ).astype(par["dtype"])
+    Rop = Real(dims=(par["nx"],), dtype=par["dtype"])
 
-    BDop = BlockDiag([Rop, MatrixMult(G, dtype=par['dtype'])],
-                     dtype=par['dtype'])
-    assert BDop.clinear == False
-    assert dottest(BDop, par['nx'] + par['ny'], 2*par['nx'],
-                   complexflag=0 if par['imag'] == 0 else 3)
+    BDop = BlockDiag([Rop, MatrixMult(G, dtype=par["dtype"])], dtype=par["dtype"])
+    assert BDop.clinear is False
+    assert dottest(
+        BDop,
+        par["nx"] + par["ny"],
+        2 * par["nx"],
+        complexflag=0 if par["imag"] == 0 else 3,
+        backend=backend,
+    )
     # forward
-    x = np.random.randn(2*par['nx']) + par['imag']*np.random.randn(2*par['nx'])
-    expected = np.concatenate([np.real(x[:par['nx']]), G @ x[par['nx']:]])
+    x = np.random.randn(2 * par["nx"]) + par["imag"] * np.random.randn(2 * par["nx"])
+    expected = np.concatenate([np.real(x[: par["nx"]]), G @ x[par["nx"] :]])
     assert_array_almost_equal(expected, BDop * x, decimal=4)

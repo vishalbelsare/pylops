@@ -16,13 +16,15 @@ the complex-valued problem:
 or the real-valued augmented system
 
 .. math::
+    \DeclareMathOperator{\Real}{Re}
+    \DeclareMathOperator{\Imag}{Im}
    \begin{bmatrix}
-       Re(\mathbf{y})  \\
-       Im(\mathbf{y})
+       \Real(\mathbf{y})  \\
+       \Imag(\mathbf{y})
    \end{bmatrix} =
    \begin{bmatrix}
-       Re(\mathbf{A})  \\
-       Im(\mathbf{A})
+       \Real(\mathbf{A})  \\
+       \Imag(\mathbf{A})
    \end{bmatrix}  \mathbf{x}
 
 Whilst we already know how to solve the first problem, let's see how we can
@@ -34,24 +36,25 @@ whenever the same pair reappears. This is very useful in our case when we
 want to compute the real and the imag components of
 
 """
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 import pylops
 
-plt.close('all')
+plt.close("all")
 np.random.seed(0)
 
 ###############################################################################
 # To start we create the forward problem
 
 n = 5
-x = np.arange(n) + 1.
+x = np.arange(n) + 1.0
 
 # make A
 Ar = np.random.normal(0, 1, (n, n))
 Ai = np.random.normal(0, 1, (n, n))
 A = Ar + 1j * Ai
-Aop = pylops.MatrixMult(A, dtype=np.complex)
+Aop = pylops.MatrixMult(A, dtype=np.complex128)
 y = Aop @ x
 
 ###############################################################################
@@ -59,7 +62,7 @@ y = Aop @ x
 A1op = Aop.toreal(forw=False, adj=True)
 xinv = A1op.div(y)
 
-print('xinv=%s\n' % xinv)
+print(f"xinv={xinv}\n")
 
 ###############################################################################
 # Let's now see how we formulate the second problem
@@ -71,4 +74,4 @@ A1op = pylops.VStack([Arop, Aiop])
 y1 = np.concatenate([np.real(y), np.imag(y)])
 xinv1 = np.real(A1op.div(y1))
 
-print('xinv1=%s\n' % xinv1)
+print(f"xinv1={xinv1}\n")

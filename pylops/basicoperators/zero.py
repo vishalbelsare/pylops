@@ -1,0 +1,105 @@
+__all__ = ["Zero"]
+
+
+import numpy as np
+
+from pylops import LinearOperator
+from pylops.utils.backend import get_array_module
+from pylops.utils.typing import DTypeLike, InputDimsLike, NDArray
+
+
+class Zero(LinearOperator):
+    r"""Zero operator.
+
+    Transform model into array of zeros of size :math:`N` in forward
+    and transform data into array of zeros of size :math:`N` in adjoint.
+
+    Parameters
+    ----------
+    N : :obj:`int` or :obj:`tuple`
+        Number of samples in data (and model, if ``M`` is not provided).
+        If a tuple is provided, this is interpreted as the data (and model)
+        are nd-arrays.
+    M : :obj:`int` or :obj:`tuple`, optional
+        Number of samples in model. If a tuple is provided, this is interpreted
+        as the model is an nd-array. Note that when `M` is a tuple, `N` must be
+        also a tuple with the same number of elements.
+    forceflat : :obj:`bool`, optional
+         .. versionadded:: 2.2.0
+
+         Force an array to be flattened after matvec and rmatvec. Note that this is only
+         required when `N` and `M` are tuples (input and output arrays are nd-arrays).
+    dtype : :obj:`str`, optional
+       Type of elements in input array.
+    name : :obj:`str`, optional
+        .. versionadded:: 2.0.0
+
+        Name of operator (to be used by :func:`pylops.utils.describe.describe`)
+
+    Attributes
+    ----------
+    dims : :obj:`tuple`
+        Shape of the array after the adjoint, but before flattening.
+
+        For example, ``x_reshaped = (Op.H * y.ravel()).reshape(Op.dims)``.
+    dimsd : :obj:`tuple`
+        Shape of the array after the forward, but before flattening.
+
+        For example, ``y_reshaped = (Op * x.ravel()).reshape(Op.dimsd)``.
+    shape : :obj:`tuple`
+        Operator shape.
+
+    Notes
+    -----
+    An *Zero* operator simply creates a null data vector :math:`\mathbf{y}` in
+    forward mode:
+
+    .. math::
+
+       \mathbf{0} \mathbf{x} = \mathbf{0}_N
+
+    and a null model vector :math:`\mathbf{x}` in forward mode:
+
+    .. math::
+
+       \mathbf{0} \mathbf{y} = \mathbf{0}_M
+
+    """
+
+    def __init__(
+        self,
+        N: int | InputDimsLike,
+        M: int | InputDimsLike | None = None,
+        forceflat: bool | None = None,
+        dtype: DTypeLike = "float64",
+        name: str = "Z",
+    ) -> None:
+        M = N if M is None else M
+        if isinstance(N, int) and isinstance(M, int):
+            # N and M are scalars (1d-arrays)
+            dims, dimsd = (M,), (N,)
+        elif isinstance(N, (tuple, list)) and isinstance(M, (tuple, list)):
+            # N and M are tuples (nd-arrays)
+            dims, dimsd = M, N
+        else:
+            msg = (
+                "N and M must have same type and equal to "
+                "int, tuple, or list, instead their types"
+                f" are type(N)={type(N)} and type(M)={type(M)}"
+            )
+            raise NotImplementedError(msg)
+        super().__init__(
+            dtype=np.dtype(dtype),
+            dims=dims,
+            dimsd=dimsd,
+            forceflat=forceflat,
+            name=name,
+        )
+
+    def _matvec(self, x: NDArray) -> NDArray:
+        ncp = get_array_module(x)
+        return ncp.zeros(self.shape[0], dtype=self.dtype)
+
+    def _rmatvec(self, x: NDArray) -> NDArray:
+        ncp = get_array_module(x)
+        return ncp.zeros(self.shape[1], dtype=self.dtype)

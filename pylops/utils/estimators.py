@@ -1,21 +1,36 @@
-import numpy
+__all__ = [
+    "trace_hutchinson",
+    "trace_hutchpp",
+    "trace_nahutchpp",
+]
 
 from itertools import chain
+from types import ModuleType
+
+import numpy
+
 from pylops.utils.backend import get_module
+from pylops.utils.typing import NDArray, Tbackend, Tsampler, Tsampler2
 
 
-def _sampler_gaussian(m, batch_size, backend_module=numpy):
+def _sampler_gaussian(
+    m: float, batch_size: int, backend_module: ModuleType = numpy
+) -> tuple[float, NDArray]:
     return backend_module.random.randn(m, batch_size)
 
 
-def _sampler_rayleigh(m, batch_size, backend_module=numpy):
+def _sampler_rayleigh(
+    m: float, batch_size: int, backend_module: ModuleType = numpy
+) -> NDArray:
     z = backend_module.random.randn(m, batch_size)
     for i in range(batch_size):
         z[:, i] *= m / backend_module.dot(z[:, i].T, z[:, i])
     return z
 
 
-def _sampler_rademacher(m, batch_size, backend_module=numpy):
+def _sampler_rademacher(
+    m: float, batch_size: int, backend_module: ModuleType = numpy
+) -> NDArray:
     return 2 * backend_module.random.binomial(1, 0.5, size=(m, batch_size)) - 1
 
 
@@ -27,8 +42,12 @@ _SAMPLERS = {
 
 
 def trace_hutchinson(
-    Op, neval=None, batch_size=None, sampler="rademacher", backend="numpy"
-):
+    Op,
+    neval: int | None = None,
+    batch_size: int | None = None,
+    sampler: Tsampler = "rademacher",
+    backend: Tbackend = "numpy",
+) -> float:
     r"""Trace of linear operator using the Hutchinson method.
 
     Returns an estimate of the trace of a linear operator using the Hutchinson
@@ -36,6 +55,8 @@ def trace_hutchinson(
 
     Parameters
     ----------
+    Op : :obj:`pylops.LinearOperator`
+        Linear operator to compute trace on.
     neval : :obj:`int`, optional
         Maximum number of matrix-vector products compute. Defaults to 10%
         of ``shape[1]``.
@@ -43,16 +64,16 @@ def trace_hutchinson(
         Vectorize computations by sampling sketching matrices instead of
         vectors. Set this value to as high as permitted by memory, but there is
         no guarantee of speedup. Coerced to never exceed ``neval``. When using
-        **unitvector** as sampler, is coerced to not exceed `shape[1]`.
+        "unitvector" as sampler, is coerced to not exceed ``shape[1]``.
         Defaults to 100 or ``neval``.
     sampler : :obj:`str`, optional
         Sample sketching matrices from the following distributions:
 
-            - **gaussian**: Mean zero, unit variance Gaussian.
-            - **rayleigh**: Sample from mean zero, unit variance Gaussian and
+            - "gaussian": Mean zero, unit variance Gaussian.
+            - "rayleigh": Sample from mean zero, unit variance Gaussian and
               normalize the columns.
-            - **rademacher**: Random sign.
-            - **unitvector**: Samples from the unit vectors :math:`\mathrm{e}_i`
+            - "rademacher": Random sign.
+            - "unitvector": Samples from the unit vectors :math:`\mathrm{e}_i`
               without replacement.
 
     backend : :obj:`str`, optional
@@ -61,11 +82,11 @@ def trace_hutchinson(
 
     Returns
     -------
-    trace : :obj:`self.dtype`
+    trace : :obj:`float`
         Operator trace.
 
     Raises
-    -------
+    ------
     ValueError
         If ``neval`` is smaller than 3.
 
@@ -87,7 +108,7 @@ def trace_hutchinson(
     Prefer the Rademacher sampler if the goal is to minimize variance, but the
     Gaussian for a better probability of approximating the correct value. Use
     the Unit Vector approach if you are sampling a large number of ``neval``
-    (compared to `shape[1]`), especially if the operator is highly-structured.
+    (compared to ``shape[1]``), especially if the operator is highly-structured.
 
     .. [1] Hutchinson, M. F. (1990). *A stochastic estimator of the trace of
            the influence matrix for laplacian smoothing splines*.
@@ -120,23 +141,29 @@ def trace_hutchinson(
             for i, idx in enumerate(z_idx):
                 z[idx, i] = 1.0
                 remaining_vectors.remove(idx)
-            trace += ncp.trace((z.T @ (Op @ z)))
+            trace += ncp.trace(z.T @ (Op @ z))
             n_total += batch
         trace *= m / n_total
         return trace[0]
 
     if sampler not in _SAMPLERS:
-        raise NotImplementedError(f"sampler {sampler} not available.")
+        msg = f"sampler {sampler} not available."
+        raise NotImplementedError(msg)
 
     sampler_fun = _SAMPLERS[sampler]
     for batch in batch_range:
         z = sampler_fun(m, batch, backend_module=ncp).astype(Op.dtype)
-        trace += ncp.trace((z.T @ (Op @ z)))
+        trace += ncp.trace(z.T @ (Op @ z))
     trace /= neval
     return trace[0]
 
 
-def trace_hutchpp(Op, neval=None, sampler="rademacher", backend="numpy"):
+def trace_hutchpp(
+    Op,
+    neval: int | None = None,
+    sampler: Tsampler2 = "rademacher",
+    backend: Tbackend = "numpy",
+) -> float:
     r"""Trace of linear operator using the Hutch++ method.
 
     Returns an estimate of the trace of a linear operator using the Hutch++
@@ -144,16 +171,18 @@ def trace_hutchpp(Op, neval=None, sampler="rademacher", backend="numpy"):
 
     Parameters
     ----------
+    Op : :obj:`pylops.LinearOperator`
+        Linear operator to compute trace on.
     neval : :obj:`int`, optional
         Maximum number of matrix-vector products compute. Defaults to 10%
         of ``shape[1]``.
     sampler : :obj:`str`, optional
         Sample sketching matrices from the following distributions:
 
-            - **gaussian**: Mean zero, unit variance Gaussian.
-            - **rayleigh**: Sample from mean zero, unit variance Gaussian and
+            - "gaussian": Mean zero, unit variance Gaussian.
+            - "rayleigh": Sample from mean zero, unit variance Gaussian and
               normalize the columns.
-            - **rademacher**: Random sign.
+            - "rademacher": Random sign.
 
     backend : :obj:`str`, optional
         Backend used to densify matrix (``numpy`` or ``cupy``). Note that
@@ -161,11 +190,11 @@ def trace_hutchpp(Op, neval=None, sampler="rademacher", backend="numpy"):
 
     Returns
     -------
-    trace : :obj:`self.dtype`
+    trace : :obj:`float`
         Operator trace.
 
     Raises
-    -------
+    ------
     ValueError
         If ``neval`` is smaller than 3.
 
@@ -184,7 +213,7 @@ def trace_hutchpp(Op, neval=None, sampler="rademacher", backend="numpy"):
            from sub-Gaussian distributions.
         2. Compute reduced QR decomposition of :math:`\mathbf{Op}\,\mathbf{S}`,
            retaining only :math:`\mathbf{Q}`.
-        3. Return :math:`\operatorname{tr}(\mathbf{Q}^T\,\mathbf{Op}\,\mathbf{Q}) + \frac{1}{\lfloor k/3\rfloor}\operatorname{tr}(\mathbf{G}^T(\mathbf{I} - \mathbf{Q}\mathbf{Q}^T)\,\mathbf{Op}\,(\mathbf{I} - \mathbf{Q}\mathbf{Q}^T)\mathbf{G})`
+        3. Return :math:`\operatorname{tr}(\mathbf{Q}^T\,\mathbf{Op}\,\mathbf{Q}) + \frac{1}{\lfloor k/3\rfloor}\operatorname{tr}\left(\mathbf{G}^T(\mathbf{I} - \mathbf{Q}\mathbf{Q}^T)\,\mathbf{Op}\,(\mathbf{I} - \mathbf{Q}\mathbf{Q}^T)\mathbf{G}\right)`
 
     Use the Rademacher sampler unless you know what you are doing.
 
@@ -200,14 +229,14 @@ def trace_hutchpp(Op, neval=None, sampler="rademacher", backend="numpy"):
     neval = int(numpy.round(m * 0.1)) if neval is None else neval
 
     if sampler not in _SAMPLERS:
-        raise NotImplementedError(f"sampler {sampler} not available.")
+        msg = f"sampler {sampler} not available."
+        raise NotImplementedError(msg)
 
     sampler_fun = _SAMPLERS[sampler]
 
     batch = neval // 3
     if batch <= 0:
-        msg = f"Sampler '{sampler}' not supported with {neval} samples."
-        msg += " Try increasing it."
+        msg = f"Sampler '{sampler}' not supported with {neval} samples. Try increasing it."
         raise ValueError(msg)
 
     S = sampler_fun(m, batch, backend_module=ncp).astype(Op.dtype)
@@ -224,12 +253,12 @@ def trace_hutchpp(Op, neval=None, sampler="rademacher", backend="numpy"):
 
 def trace_nahutchpp(
     Op,
-    neval=None,
-    sampler="rademacher",
-    c1=1.0 / 6.0,
-    c2=1.0 / 3.0,
-    backend="numpy",
-):
+    neval: int | None = None,
+    sampler: Tsampler2 = "rademacher",
+    c1: float = 1.0 / 6.0,
+    c2: float = 1.0 / 3.0,
+    backend: Tbackend = "numpy",
+) -> float:
     r"""Trace of linear operator using the NA-Hutch++ method.
 
     Returns an estimate of the trace of a linear operator using the
@@ -237,16 +266,18 @@ def trace_nahutchpp(
 
     Parameters
     ----------
+    Op : :obj:`pylops.LinearOperator`
+        Linear operator to compute trace on.
     neval : :obj:`int`, optional
         Maximum number of matrix-vector products compute. Defaults to 10%
         of ``shape[1]``.
     sampler : :obj:`str`, optional
         Sample sketching matrices from the following distributions:
 
-            - **gaussian**: Mean zero, unit variance Gaussian.
-            - **rayleigh**: Sample from mean zero, unit variance Gaussian and
+            - "gaussian": Mean zero, unit variance Gaussian.
+            - "rayleigh": Sample from mean zero, unit variance Gaussian and
               normalize the columns.
-            - **rademacher**: Random sign.
+            - "rademacher": Random sign.
 
     c1 : :obj:`float`, optional
         Fraction of ``neval`` for sketching matrix :math:`\mathbf{S}`.
@@ -259,11 +290,11 @@ def trace_nahutchpp(
 
     Returns
     -------
-    trace : :obj:`self.dtype`
+    trace : :obj:`float`
         Operator trace.
 
     Raises
-    -------
+    ------
     ValueError
         If ``neval`` not large enough to accomodate ``c1`` and ``c2``.
 
@@ -305,7 +336,8 @@ def trace_nahutchpp(
     neval = int(numpy.round(m * 0.1)) if neval is None else neval
 
     if sampler not in _SAMPLERS:
-        raise NotImplementedError(f"sampler {sampler} not available.")
+        msg = f"sampler {sampler} not available."
+        raise NotImplementedError(msg)
 
     sampler_fun = _SAMPLERS[sampler]
 

@@ -1,8 +1,20 @@
+__all__ = ["power_iteration"]
+
+
 import numpy as np
+
+from pylops import LinearOperator
 from pylops.utils.backend import get_module
+from pylops.utils.typing import NDArray, Tbackend
 
 
-def power_iteration(Op, niter=10, tol=1e-5, dtype='float32', backend='numpy'):
+def power_iteration(
+    Op: LinearOperator,
+    niter: int = 10,
+    tol: float = 1e-5,
+    dtype: str = "float32",
+    backend: Tbackend = "numpy",
+) -> tuple[float, NDArray, int]:
     """Power iteration algorithm.
 
     Power iteration algorithm, used to compute the largest eigenvector and
@@ -27,9 +39,9 @@ def power_iteration(Op, niter=10, tol=1e-5, dtype='float32', backend='numpy'):
 
     Returns
     -------
-    maxeig : :obj:`int`
+    maxeig : :obj:`float`
         Largest eigenvalue
-    b_k : :obj:`np.ndarray` or :obj:`cp.ndarray`
+    b_k : :obj:`numpy.ndarray` or :obj:`cupy.ndarray`
         Largest eigenvector
     iiter : :obj:`int`
         Effective number of iterations
@@ -45,13 +57,13 @@ def power_iteration(Op, niter=10, tol=1e-5, dtype='float32', backend='numpy'):
 
     # Choose a random vector to decrease the chance that vector
     # is orthogonal to the eigenvector
-    b_k = ncp.random.rand(Op.shape[1]).astype(dtype) + \
-          cmpx * ncp.random.rand(Op.shape[1]).astype(dtype)
+    b_k = ncp.random.rand(Op.shape[1]).astype(dtype) + cmpx * ncp.random.rand(
+        Op.shape[1]
+    ).astype(dtype)
     b_k = b_k / ncp.linalg.norm(b_k)
 
-    niter = 10 if niter is None else niter
-    maxeig_old = 0.
-    for iiter in range(niter):
+    maxeig_old = 0.0
+    for _iiter in range(niter):
         # compute largest eigenvector
         b1_k = Op.matvec(b_k)
 
@@ -65,4 +77,4 @@ def power_iteration(Op, niter=10, tol=1e-5, dtype='float32', backend='numpy'):
             break
         maxeig_old = maxeig
 
-    return maxeig, b_k, iiter + 1
+    return maxeig, b_k, _iiter + 1

@@ -1,0 +1,42 @@
+import os
+from cmath import exp
+from math import pi
+
+from numba import jit, prange
+
+# Detect whether to use parallel and cache or not
+numba_threads = int(os.getenv("NUMBA_NUM_THREADS", "1"))
+parallel = True if numba_threads != 1 else False
+cache = bool(int(os.getenv("NUMBA_CACHE_PYLOPS", 0)))
+
+
+@jit(nopython=True, parallel=parallel, nogil=True, cache=cache, fastmath=True)
+def _radon_inner_3d(X, Y, f, py, px, hy, hx, flim0, flim1, npy, npx, nhy, nhx):
+    for ihy in prange(nhy):
+        for ihx in prange(nhx):
+            for ifr in range(flim0, flim1):
+                for ipy in range(npy):
+                    for ipx in range(npx):
+                        Y[ihy, ihx, ifr] += X[ipy, ipx, ifr] * exp(
+                            -1j
+                            * 2
+                            * pi
+                            * f[ifr]
+                            * (py[ipy] * hy[ihy] + px[ipx] * hx[ihx])
+                        )
+
+
+@jit(nopython=True, parallel=parallel, nogil=True, cache=cache, fastmath=True)
+def _aradon_inner_3d(X, Y, f, py, px, hy, hx, flim0, flim1, npy, npx, nhy, nhx):
+    for ipy in prange(npy):
+        for ipx in range(npx):
+            for ifr in range(flim0, flim1):
+                for ihy in range(nhy):
+                    for ihx in range(nhx):
+                        X[ipy, ipx, ifr] += Y[ihy, ihx, ifr] * exp(
+                            1j
+                            * 2
+                            * pi
+                            * f[ifr]
+                            * (py[ipy] * hy[ihy] + px[ipx] * hx[ihx])
+                        )

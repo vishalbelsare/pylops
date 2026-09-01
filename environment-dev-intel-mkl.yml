@@ -1,0 +1,47 @@
+name: pylops
+channels:
+  - https://software.repos.intel.com/python/conda
+  - conda-forge
+  - defaults
+  - numba
+dependencies:
+  - python>=3.10.0
+  - pip
+  - numpy>=2.0.0
+  - scipy>=1.13.0
+  - pyfftw
+  - pywavelets
+  - sympy
+  - pymc>=5
+  - pytensor
+  - astra-toolbox>=2.3.0
+  - matplotlib
+  - ipython
+  - pytest
+  - Sphinx
+  - numpydoc
+  - numba
+  - icc_rt
+  - pre-commit
+  - autopep8
+  - mkl_fft
+  - pip:
+    - torch
+    - curvelets>=1.2
+    - devito
+    # - dtcwt (until numpy>=2.0.0 is supported)
+    - scikit-fmm
+    - spgl1
+    - jax
+    - pytest-runner
+    - shibuya
+    - sphinx-design
+    - sphinx-gallery
+    - sphinx-iconify
+    - pooch
+    - nbsphinx
+    - sphinxemoji
+    - image
+    - ruff
+    - mypy
+    - coverage

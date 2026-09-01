@@ -1,21 +1,365 @@
 .. _changlog:
 
-Changelog
-=========
+|:newspaper_roll:| Changelog
+############################
+
+Version 2.8.0
+-------------
+
+*Released on: 25/07/2026*
+
+* Added :py:class:`pylops.signalprocessing.UDCT` operator
+* Added ``forward``, ``adjoint``, and ``__repr__`` methods to :py:class:`pylops.TorchOperator`
+* Added ``sparse`` to :py:func:`pylops.utils.signalprocessing.convmtx`
+  and :py:func:`pylops.utils.signalprocessing.nonstationary_convmtx`
+* Added ``damp`` to :py:class:`pylops.optimization.cls_basic.CG` and :py:func:`pylops.optimization.basic.cgls`
+* Added ``tol`` to :py:class:`pylops.signalprocessing.Interp` to limit extension of sinc interpolation
+  and implemented CuPy backend
+* Added CuPy support to :py:func:`pylops.utils.signalprocessing.slope_estimate`
+* Enabled repeated indices :py:class:`pylops.Restriction`
+* Fixed call to ``on_end`` callback in :py:class:`pylops.optimization.basesolver.Solver` to pass
+  output of step instead of input
+* Fixed handling of ``decay`` in :py:class:`pylops.optimization.cls_sparsity.ISTA` and
+  :py:class:`pylops.optimization.cls_sparsity.FISTA` when ``niter`` is not passed 
+  to setup method
+* Fixed element-wise variance accumulation in :py:class:`pylops.optimization.cls_basic.LSQR` 
+  and :py:func:`pylops.optimization.basic.lsqr`, which previously assigned the same value to 
+  every entry of `var`
+
+
+Version 2.7.0
+-------------
+
+*Released on: 17/05/2026*
+
+* Added cubic spline interpolation operator via
+  :py:class:`pylops.signalprocessing.InterpCubicSpline` (also interfaceable via
+  :py:class:`pylops.signalprocessing.Interp` with `kind="cubic_spline"`)
+* Added :py:class:`pylops.medical.MRI2D` operator
+* Added :py:class:`pylops.SmoothingND` operator
+* Added 3d extension to :py:func:`pylops.utils.signalprocessing.pwd_slope_estimate`
+* Fixed unwanted upcasting in :py:class:`pylops.avo.avo.AVOLinearModelling`,
+  :py:class:`pylops.Laplacian`, :py:class:`pylops.signalprocessing.Bilinear`,
+  :py:class:`pylops.signalprocessing.Interp`, :py:class:`pylops.signalprocessing.NonStationaryFilters2D`,
+  :py:class:`pylops.signalprocessing.Seislet`, :py:class:`pylops.signalprocessing.Sliding1D`,
+  :py:class:`pylops.signalprocessing.Sliding2D`, :py:class:`pylops.signalprocessing.Sliding3D`,
+  :py:class:`pylops.Smoothing1D`, :py:class:`pylops.Smoothing2D`,
+  and :py:class:`pylops.waveeqprocessing.Marchenko`
+* Improved typing annotations across all operators (and enforced use of 
+  Literal for parameters with multiple options)
+
+
+Version 2.6.0
+-------------
+
+*Released on: 24/11/2025*
+
+* Added :py:mod:`pylops.medical` module and :py:class:`pylops.medical.CT2D` operator
+* Added :py:func:`pylops.utils.signalprocessing.pwd_slope_estimate` and
+  :py:class:`pylops.signalprocessing.PWSprayer2D` and 
+  :py:class:`pylops.signalprocessing.PWSmoother2D` operators 
+* Added support for multithreading to :py:class:`pylops.Block`,
+  :py:class:`pylops.BlockDiag`, :py:class:`pylops.HStack`,
+  and :py:class:`pylops.VStack` (and `parallel_kind` parameter) 
+* Added ``kwargs_fft`` to :py:class:`pylops.waveeqprocessing.BlendingContinuous`,
+  :py:class:`pylops.waveeqprocessing.BlendingGroup`, and
+  :py:class:`pylops.waveeqprocessing.BlendingHalf`
+* Added ``nttot`` to :py:class:`pylops.waveeqprocessing.BlendingContinuous`
+* Added ``fftengine`` to  :py:class:`pylops.waveeqprocessing.PhaseShift`
+* Added ``mkl_fft`` engine to :py:class:`pylops.signalprocessing.FFT`,
+  :py:class:`pylops.signalprocessing.FFT2D`, and :py:class:`pylops.signalprocessing.FFTND`
+* Added JAX backend to :py:class:`pylops.signalprocessing.ChirpRadon2D` and
+  :py:class:`pylops.signalprocessing.ChirpRadon3D` operators.
+* Added :py:class:`pylops.optimization.callback.CostNanInfCallback`, 
+  :py:class:`pylops.optimization.callback.CostToDataCallback`, and
+  :py:class:`pylops.optimization.callback.CostToInitialCallback` callbacks, and
+  and ``rtol`` and ``rtol1`` parameters in all solvers
+* Optimized internal handling of :py:class:`pylops.Zero` operators in
+  :py:class:`pylops.BlockDiag`, :py:class:`pylops.HStack`, and
+  :py:class:`pylops.VStack`
+* Homogenize error/warning/info messages across the library by switching to
+  ``logging/warning`` 
+* Fixed initialization of ``r`` and ``rw`` in :py:class:`pylops.optimization.cls_sparsity.IRLS`
+* Fixed :py:func:`pylops.optimization.cls_sparsity._halfthreshold` for complex valued CuPy arrays
+* Fixed initialization of ``decay`` in sparse solvers to correctly solve complex-valued 
+  problems
+* Fixed bug when calling ``__pow__`` of a linear operator with CuPy arrays
+* Fixed dtype handling in :py:class:`pylops.optimization.cls_sparsity.ISTA` and
+  :py:class:`pylops.optimization.cls_sparsity.FISTA`
+
+
+Version 2.5.0
+-------------
+
+*Released on: 21/06/2025*
+
+* Added `cuda` engine to :py:class:`pylops.waveeqprocessing.Kirchhoff` 
+  operator
+* Added `Opbasis` and `optimal_coeff` to 
+  :py:class:`pylops.optimization.cls_sparsity.OMP`
+* Added `solver` to the input parameters of the `_oneshot`
+  internal methods of :py:class:`pylops.waveeqprocessing.AcousticWave2D`
+  to avoid recreating it for every shot
+* Added `kwargs_fft` to `pylops.signalprocessing.FFT`,
+  :py:class:`pylops.signalprocessing.FFT2D`, and 
+  :py:class:`pylops.signalprocessing.FFTND`
+* Fix bug in :py:func:`pylops.waveeqprocessing.MDD` when using
+  CuPy arrays for `G` and `d` with `twosided=True` and `add_negative=True`
+* Fix bug in :py:class:`pylops.signalprocessing.FourierRadon3D` 
+  in the default choice of `num_threads_per_blocks`
+* Fix bug in :py:class:`pylops.signalprocessing.Convolve1D` 
+  in the definition of `pad` and `padd` when applying the 
+  operator to a CuPy array
+* Fix bug in :py:class:`pylops.optimization.cls_sparsity.OMP` avoiding 
+  passing `explicit` in the creation of `_ColumnLinearOperator`
+* Fix bug in :py:class:`pylops.optimization.cls_sparsity.OMP` callback 
+  method as `cols` was not passed not allowing ``x`` to be 
+  properly reconstructed
+* Fix bug in :py:func:`pylops.waveeqprocessing.SeismicInterpolation` 
+  in calculation of `sampling` when not passed
+
+
+Version 2.4.0
+-------------
+
+*Released on: 11/12/2024*
+
+* Added :py:class:`pylops.signalprocessing.FourierRadon2d` and 
+  :py:class:`pylops.signalprocessing.FourierRadon3d` operators
+* Added :py:class:`pylops.PyTensorOperator` operator
+* Added :py:class:`pylops.ToCupy` operator
+* Added :py:class:`pylops.utils.seismicevents.parabolic3d` method
+* Fix bug in :py:class:`pylops.Restriction` when passing iava as cupy array
+
+  
+Version 2.3.1
+-------------
+
+*Released on: 17/08/2024*
+
+* Fixed bug in :py:mod:`pylops.utils.backend` (see https://github.com/PyLops/pylops/issues/606)
+
+
+Version 2.3.0
+-------------
+
+*Released on: 16/08/2024*
+
+* Added :py:class:`pylops.JaxOperator`, :py:class:`pylops.signalprocessing.DWTND`, and :py:class:`pylops.signalprocessing.DTCWT` operators.
+* Added `updatesrc` method to :py:class:`pylops.waveeqprocessing.AcousticWave2D`
+* Added `verb` to :py:func:`pylops.signalprocessing.Sliding1D.sliding1d_design`, :py:func:`pylops.signalprocessing.Sliding2D.sliding2d_design`,
+  :py:func:`pylops.signalprocessing.Sliding3D.sliding3d_design`, :py:func:`pylops.signalprocessing.Patch2D.patch2d_design`,
+  and :py:func:`pylops.signalprocessing.Patch3D.patch3d_design`
+* Added `kwargs_fft` to :py:class:`pylops.signalprocessing.FFTND`
+* Added `cosinetaper` to :py:class:`pylops.utils.tapers.cosinetaper`
+* Added `kind` to :py:class:`pylops.waveeqprocessing.Deghosting`.
+* Modified all methods in :py:mod:`pylops.utils.backend` to enable jax integration
+* Modified implementations of :py:class:`pylops.signalprocessing.Sliding1D`, :py:class:`pylops.signalprocessing.Sliding2D`, 
+  :py:class:`pylops.signalprocessing.Sliding3D`, :py:class:`pylops.signalprocessing.Patch2D`, and
+  :py:class:`pylops.signalprocessing.Patch3D` to being directly implemented instead of relying on 
+  other PyLops operators. Added also `savetaper` parameter and an option to apply the operator `Op`
+  simultaneously to all windows
+* Modified :py:func:`pylops.waveeqprocessing.AcousticWave2D._born_oneshot` 
+  and :py:func:`pylops.waveeqprocessing.AcousticWave2D._born_allshots` to avoid
+  recreating the devito solver for each shot (and enabling internal caching...) 
+* Modified `dtype` of :py:class:`pylops.signalprocessing.Shift` to be that of the input vector.
+* Modified :py:class:`pylops.waveeqprocessing.BlendingContinuous` to use `matvec/rmatvec` instead of `@/.H @` 
+  for compatibility with pylops solvers
+* Removed `cusignal` as optional dependency and `cupy`'s equivalent methods (since the library 
+  is now unmantained and merged into `cupy`)
+* Fixed ImportError of optional dependencies when installed but not correctly functioning (see https://github.com/PyLops/pylops/issues/548)
+* Fixed bug in :py:func:`pylops.utils.deps.to_cupy_conditional` (see https://github.com/PyLops/pylops/issues/579)
+* Fixed bug in the definition of `nttot` in :py:class:`pylops.waveeqprocessing.BlendingContinuous`
+* Fixed bug in :py:func:`pylops.utils.signalprocessing.dip_estimate` (see https://github.com/PyLops/pylops/issues/572)
+
+Version 2.2.0
+-------------
+
+*Released on: 11/11/2023*
+
+* Added :py:class:`pylops.signalprocessing.NonStationaryConvolve3D` operator
+* Added nd-array capabilities to :py:class:`pylops.basicoperators.Identity` and :py:class:`pylops.basicoperators.Zero`
+* Added second implementation in :py:class:`pylops.waveeqprocessing.BlendingContinuous` which is more
+  performant when dealing with small number of receivers
+* Added `forceflat` property to operators with ambiguous `rmatvec` (:py:class:`pylops.basicoperators.Block`,
+  :py:class:`pylops.basicoperators.Bilinear`, :py:class:`pylops.basicoperators.BlockDiag`, :py:class:`pylops.basicoperators.HStack`,
+  :py:class:`pylops.basicoperators.MatrixMult`, :py:class:`pylops.basicoperators.VStack`, and :py:class:`pylops.basicoperators.Zero`)
+* Improved `dynamic` mode of :py:class:`pylops.waveeqprocessing.Kirchhoff` operator
+* Modified :py:class:`pylops.signalprocessing.Convolve1D` to allow both filters that are both shorter and longer of the
+  input vector
+* Modified all solvers to use `matvec/rmatvec` instead of `@/.H @` to improve performance
+
+
+Version 2.1.0
+-------------
+
+*Released on: 17/03/2023*
+
+* Added :py:class:`pylops.signalprocessing.DCT`, :py:class:`pylops.signalprocessing.NonStationaryConvolve1D`,
+  :py:class:`pylops.signalprocessing.NonStationaryConvolve2D`, :py:class:`pylops.signalprocessing.NonStationaryFilters1D`, and
+  :py:class:`pylops.signalprocessing.NonStationaryFilters2D` operators
+* Added :py:class:`pylops.waveeqprocessing.BlendingContinuous`, :py:class:`pylops.waveeqprocessing.BlendingGroup`, and
+  :py:class:`pylops.waveeqprocessing.BlendingHalf` operators
+* Added `kind='datamodel'` to :py:class:`pylops.optimization.cls_sparsity.IRLS`
+* Improved inner working of :py:class:`pylops.waveeqprocessing.Kirchhoff` operator significantly
+  reducing the memory usage related to storing traveltime, angle, and amplitude tables.
+* Improved handling of `haxes` in :py:class:`pylops.signalprocessing.Radon2D` and :py:class:`pylops.signalprocessing.Radon3D` operators
+* Added possibility to feed ND-arrays to :py:class:`pylops.TorchOperator`
+* Removed :py:class:`pylops.LinearOperator` inheritance and added `__call__` method to :py:class:`pylops.TorchOperator`
+* Removed `scipy.sparse.linalg.LinearOperator` and added :py:class:`abc.ABC` inheritance to :py:class:`pylops.LinearOperator`
+* All operators are now classes of `:py:class:`pylops.LinearOperator` type
+
+
+Version 2.0.0
+-------------
+
+*Released on: 12/08/2022*
+
+PyLops has undergone significant changes in this release, including new ``LinearOperator`` s, more features, new examples and bugfixes.
+To aid users in navigating the breaking changes, we provide the following document
+`MIGRATION_V1_V2.md <https://github.com/PyLops/pylops/blob/dev/MIGRATION_V1_V2.md>`_.
+
+**New Features**
+
+* Multiplication of linear operators by N-dimensional arrays is now supported via the new ``dims``/``dimsd`` properties.
+  Users do not need to use ``.ravel`` and ``.reshape`` as often anymore. See the migration guide for more information.
+* Typing annotations for several submodules (``avo``, ``basicoperators``, ``signalprocessing``, ``utils``, ``optimization``,
+  ``waveeqprocessing``)
+* New :py:class:`pylops.TorchOperator` wraps a Pylops operator into a PyTorch function
+* New :py:class:`pylops.signalprocessing.Patch3D` applies a linear operator repeatedly to patches of the model vector
+* Each of :py:class:`pylops.signalprocessing.Sliding1D`, :py:class:`pylops.signalprocessing.Sliding2D`,
+  :py:class:`pylops.signalprocessing.Sliding3D`, :py:class:`pylops.signalprocessing.Patch2D` and :py:class:`pylops.signalprocessing.Patch3D`
+  have an associated ``slidingXd_design`` or ``patchXd_design`` functions associated with them to aid the user in designing the windows
+* :py:class:`pylops.FirstDerivative` and :py:class:`pylops.SecondDerivative`, and therefore other derivative operators which rely on the
+  (e.g., :py:class:`pylops.Gradient`) support higher order stencils
+* :py:class:`pylops.waveeqprocessing.Kirchhoff` substitutes :py:class:`pylops.waveeqprocessing.Demigration` and incorporates a variety of
+  new functionalities
+* New :py:class:`pylops.waveeqprocessing.AcousticWave2D` wraps the `Devito <https://www.devitoproject.org/>`_ acoutic wave propagator
+  providing a wave-equation based Born modeling operator with a reverse-time migration adjoint
+* Solvers can now be implemented via the :py:class:`pylops.optimization.basesolver.Solver` class. They can now be used through a
+  functional interface with lowercase name (e.g., :py:func:`pylops.optimization.sparsity.splitbregman`) or via class interface with CamelCase name
+  (e.g., :py:class:`pylops.optimization.cls_sparsity.SplitBregman`. Moreover, solvers now accept callbacks defined by the
+  :py:class:`pylops.optimization.callback.Callbacks` interface (see e.g., :py:class:`pylops.optimization.callback.MetricsCallback`)
+* Metrics such as :py:func:`pylops.utils.metrics.mae` and :py:func:`pylops.utils.metrics.mse` and others
+* New :py:func:`pylops.utils.signalprocessing.dip_estimate` estimates local dips in an image (measured in radians) in a stabler way than the old :py:func:`pylops.utils.signalprocessing.dip_estimate` did for slopes.
+* New :py:func:`pylops.utils.tapers.tapernd` for N-dimensional tapers
+* New wavelets :py:func:`pylops.utils.wavelets.klauder` and :py:func:`pylops.utils.wavelets.ormsby`
+
+**Documentation**
+
+* `Installation <https://pylops.readthedocs.io/en/latest/installation.html>`_ has been revamped
+* Revamped guide on how to `implement a new LinearOperator from scratch <https://pylops.readthedocs.io/en/latest/adding.html>`_
+* New guide on how to `implement a new solver from scratch <https://pylops.readthedocs.io/en/latest/addingsolver.html>`_
+* New tutorials:
+
+  - `Solvers (Advanced) <https://pylops.readthedocs.io/en/latest/tutorials/classsolvers.html>`_
+  - `Deblending <https://pylops.readthedocs.io/en/latest/tutorials/deblending.html>`_
+  - `Automatic Differentiation <https://pylops.readthedocs.io/en/latest/tutorials/torchop.html>`_
+
+* New gallery examples:
+
+  - `Patching <https://pylops.readthedocs.io/en/latest/gallery/plot_patching.html#sphx-glr-gallery-plot-patching-py>`_
+  - `Wavelets <https://pylops.readthedocs.io/en/latest/gallery/plot_wavs.html>`_
+
+
+Version 1.18.3
+--------------
+
+*Released on: 30/07/2022*
+
+* Refractored :py:func:`pylops.utils.dottest`, and added two new optional input parameters
+  (`atol` and `rtol`)
+* Added optional parameter `densesolver` to :py:func:`pylops.LinearOperator.div`
+* Fixed :py:class:`pylops.optimization.basic.lsqr`, :py:class:`pylops.optimization.sparsity.ISTA`, and
+  :py:class:`pylops.optimization.sparsity.FISTA` to work with cupy arrays. This change was required
+  by how recent cupy versions handle scalars, which are not converted directly into float types,
+  rather kept as cupy arrays.
+* Fix bug in :py:class:`pylops.waveeqprocessing.Deghosting` introduced in
+  commit `7e596d4 <https://github.com/PyLops/pylops/commit/7e596d4dad3793d6430204b7a9b214a9dc39616c>`_.
+
+
+Version 1.18.2
+--------------
+
+*Released on: 29/04/2022*
+
+* Refractored :py:func:`pylops.utils.dottest`, and added two new optional input parameters
+  (`atol` and `rtol`)
+* Added optional parameter `densesolver` to :py:func:`pylops.LinearOperator.div`
+
+
+Version 1.18.1
+--------------
+
+*Released on: 29/04/2022*
+
+* !DELETED! due to a mistake in the release process
+
+
+Version 1.18.0
+--------------
+
+*Released on: 19/02/2022*
+
+* Added `NMO` example to gallery
+* Extended :py:func:`pylops.Laplacian` to N-dimensional arrays
+* Added `forward` kind to :py:class:`pylops.SecondDerivative` and
+  :py:func:`pylops.Laplacian`
+* Added `chirp-sliding` kind to :py:func:`pylops.waveeqprocessing.SeismicInterpolation`
+* Fixed bug due to the new internal structure of `LinearOperator` submodule introduced in `scipy1.8.0`
+
+
+Version 1.17.0
+--------------
+
+*Released on: 29/01/2022*
+
+* Added :py:class:`pylops.utils.describe.describe` method
+* Added ``fftengine`` to :py:class:`pylops.waveeqprocessing.Marchenko`
+* Added ``ifftshift_before`` and ``fftshift_after`` optional input parameters in
+  :py:class:`pylops.signalprocessing.FFT`
+* Added ``norm`` optional input parameter to :py:class:`pylops.signalprocessing.FFT2D` and
+  :py:class:`pylops.signalprocessing.FFTND`
+* Added ``scipy`` backend to :py:class:`pylops.signalprocessing.FFT` and
+  :py:class:`pylops.signalprocessing.FFT2D` and :py:class:`pylops.signalprocessing.FFTND`
+* Added ``eps`` optional input parameter in
+  :py:func:`pylops.utils.signalprocessing.slope_estimate`
+* Added pre-commit hooks
+* Improved  pre-commit hooks
+* Vectorized :py:func:`pylops.utils.signalprocessing.slope_estimate`
+* Handlexd ``nfft<nt`` case in :py:class:`pylops.signalprocessing.FFT` and
+  :py:class:`pylops.signalprocessing.FFT2D` and :py:class:`pylops.signalprocessing.FFTND`
+* Introduced automatic casting of dtype in :py:class:`pylops.MatrixMult`
+* Improved documentation and definition of optinal parameters
+  of :py:class:`pylops.Spread`
+* Major clean up of documentation and mathematical formulas
+* Major refractoring of the inner structure of :py:class:`pylops.signalprocessing.FFT` and
+  :py:class:`pylops.signalprocessing.FFT2D` and :py:class:`pylops.signalprocessing.FFTND`
+* Reduced warnings in test suite
+* Reduced computational time of ``test_wavedecomposition`` in the test suite
+* Fixed bug in :py:class:`pylops.signalprocessing.Sliding1D`,
+  :py:class:`pylops.signalprocessing.Sliding2D` and
+  :py:class:`pylops.signalprocessing.Sliding3D` where the ``dtype`` of the Restriction
+  operator is inffered from ``Op``
+* Fixed bug in :py:class:`pylops.signalprocessing.Radon2D` and
+  :py:class:`pylops.signalprocessing.Radon3D` when using centered spatial axes
+* Fixed scaling in :py:class:`pylops.signalprocessing.FFT` with ``real=True`` to pass the
+  dot-test
 
 Version 1.16.0
 --------------
 
 *Released on: 11/12/2021*
 
-* Added `pylops.utils.estimators` module for trace estimation
-* Added `x0` in `pylops.optimization.sparsity.ISTA` and
-  `pylops.optimization.sparsity.FISTA` to handle non-zero initial guess
-* Modified `pylops.optimization.sparsity.ISTA` and
-  `pylops.optimization.sparsity.FISTA` to handle multiple right hand sides
-* Modified creation of `haxis` in `pylops.signalprocessing.Radon2D` and
-  `pylops.signalprocessing.Radon3D` to allow for uncentered spatial axes
-* Fixed `_rmatvec` for explicit in `pylops.LinearOperator._ColumnLinearOperator`
+* Added :py:mod:`pylops.utils.estimators` submodule for trace estimation
+* Added `x0` in :py:func:`pylops.optimization.sparsity.ISTA` and
+  :py:func:`pylops.optimization.sparsity.FISTA` to handle non-zero initial guess
+* Modified :py:func:`pylops.optimization.sparsity.ISTA` and
+  :py:func:`pylops.optimization.sparsity.FISTA` to handle multiple right hand sides
+* Modified creation of `haxis` in :py:class:`pylops.signalprocessing.Radon2D` and
+  :py:class:`pylops.signalprocessing.Radon3D` to allow for uncentered spatial axes
+* Fixed `_rmatvec` for explicit in :py:class:`pylops.LinearOperator._ColumnLinearOperator`
+
 
 Version 1.15.0
 --------------
@@ -35,7 +379,7 @@ Version 1.15.0
   ``full``, ``half``, or ``trapezoidal`` integration.
 * Fixed `_hardthreshold_percentile` in
   :py:mod:`pylops.optimization.sparsity`
-  - `Issue #249 <https://github.com/Statoil/pylops/issues/249>`_.
+  (see https://github.com/PyLops/pylops/issues/249).
 * Fixed r2norm in :py:func:`pylops.optimization.solver.cgls`.
 
 
@@ -86,7 +430,7 @@ Version 1.13.0
 * Fixed bug in data reshaping in check in
   :py:class:`pylops.avo.prestack.PrestackInversion`
 * Fixed loading error when using old cupy and/or cusignal
-  (see `Issue #201 <https://github.com/PyLops/pylops/issues/201>`_)
+  (see https://github.com/PyLops/pylops/issues/201)
 
 
 Version 1.12.0
@@ -108,7 +452,7 @@ Version 1.11.1
 *Released on: 24/10/2020*
 
 * Fixed import of ``pyfttw`` when not available in
-  :py:class:``pylops.signalprocessing.ChirpRadon3D`
+  :py:class:`pylops.signalprocessing.ChirpRadon3D`
 
 
 Version 1.11.0
@@ -161,7 +505,7 @@ Version 1.9.1
   :py:class:`pylops.signalprocessing.FFT2D` to ensure that the type of the input
   vector is retained when applying forward and adjoint.
 * Added ``dtype`` parameter to the ``FFT`` calls in the definition of the
-  :py:class:`pylops.waveeqprocessing.MDD` operation. This ensure that the type
+  :py:func:`pylops.waveeqprocessing.MDD` operation. This ensure that the type
   of the real part of ``G`` input is enforced to the output vectors of the
   forward and adjoint operations.
 
@@ -205,7 +549,7 @@ Version 1.8.0
   :py:class:`pylops.waveeqprocessing.UpDownComposition3Doperator`, and
   :py:class:`pylops.waveeqprocessing.PhaseShift` operators
 * Fix bug in :py:class:`pylops.basicoperators.Kronecker`
-  (see `Issue #125 <https://github.com/PyLops/pylops/issues/125>`_)
+  (see https://github.com/PyLops/pylops/issues/125)
 
 
 Version 1.7.0
@@ -295,7 +639,7 @@ Version 1.3.0
 * Added :py:func:`pylops.optimization.sparsity.ISTA` and
   :py:func:`pylops.optimization.sparsity.FISTA` sparse solvers
 * Added possibility to broadcast (handle multi-dimensional arrays)
-  to :py:class:`pylops.Diagonal` and :py:func:`pylops..Restriction` operators
+  to :py:class:`pylops.Diagonal` and :py:class:`pylops.Restriction` operators
 * Added :py:class:`pylops.signalprocessing.Interp` operator
 * Added :py:class:`pylops.Spread` operator
 * Added :py:class:`pylops.signalprocessing.Radon2D` operator

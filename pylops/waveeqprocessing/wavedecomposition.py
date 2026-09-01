@@ -1,26 +1,48 @@
-import logging
-import numpy as np
+__all__ = [
+    "PressureToVelocity",
+    "UpDownComposition2D",
+    "UpDownComposition3D",
+    "WavefieldDecomposition",
+]
 
+from collections.abc import Callable, Sequence
+from typing import Literal
+
+import numpy as np
 from scipy.signal import filtfilt
 from scipy.sparse.linalg import lsqr
-from pylops.utils import dottest as Dottest
-from pylops import Diagonal, Identity, Block, BlockDiag
+
+from pylops import Block, BlockDiag, Diagonal, Identity, LinearOperator
 from pylops.signalprocessing import FFT2D, FFTND
-from pylops.utils.backend import get_module, get_module_name, get_array_module
+from pylops.utils import dottest as Dottest
+from pylops.utils.backend import get_array_module, get_module, get_module_name
+from pylops.utils.typing import (
+    DTypeLike,
+    InputDimsLike,
+    NDArray,
+    Tfftengine_ncj,
+    Tfftengine_ns,
+)
 
-logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.WARNING)
 
-
-def _filter_obliquity(OBL, F, Kx, vel, critical, ntaper, Ky=0):
+def _filter_obliquity(
+    OBL: NDArray,
+    F: NDArray,
+    Kx: NDArray,
+    vel: float,
+    critical: float,
+    ntaper: int,
+    Ky: NDArray = 0,
+) -> NDArray:
     """Apply masking of ``OBL`` based on critical angle and tapering at edges
 
     Parameters
     ----------
-    OBL : :obj:`np.ndarray`
+    OBL : :obj:`numpy.ndarray`
         Obliquity factor
-    F : :obj:`np.ndarray`
+    F : :obj:`numpy.ndarray`
         Frequency grid
-    Kx : :obj:`np.ndarray`
+    Kx : :obj:`numpy.ndarray`
         Horizonal wavenumber grid
     vel : :obj:`float`
         Velocity along the receiver array (must be constant)
@@ -29,16 +51,16 @@ def _filter_obliquity(OBL, F, Kx, vel, critical, ntaper, Ky=0):
     ntaper : :obj:`float`, optional
         Number of samples of taper applied to obliquity factor around critical
         angle
-    Ky : :obj:`np.ndarray`, optional
+    Ky : :obj:`numpy.ndarray`, optional
         Second horizonal wavenumber grid
 
     Returns
     -------
-    OBL : :obj:`np.ndarray`
+    OBL : :obj:`numpy.ndarray`
         Filtered obliquity factor
 
     """
-    critical /= 100.
+    critical /= 100.0
     mask = np.sqrt(Kx**2 + Ky**2) < critical * np.abs(F) / vel
     OBL *= mask
     OBL = filtfilt(np.ones(ntaper) / float(ntaper), 1, OBL, axis=0)
@@ -48,8 +70,20 @@ def _filter_obliquity(OBL, F, Kx, vel, critical, ntaper, Ky=0):
     return OBL
 
 
-def _obliquity2D(nt, nr, dt, dr, rho, vel, nffts, critical=100., ntaper=10,
-                 composition=True, backend='numpy', dtype='complex128'):
+def _obliquity2D(
+    nt: int,
+    nr: int,
+    dt: float,
+    dr: float,
+    rho: float,
+    vel: float,
+    nffts: InputDimsLike,
+    critical: float = 100.0,
+    ntaper: int = 10,
+    composition: bool = True,
+    backend: Tfftengine_ncj = "numpy",
+    dtype: DTypeLike = "complex128",
+) -> tuple[LinearOperator, LinearOperator]:
     r"""2D Obliquity operator and FFT operator
 
     Parameters
@@ -93,13 +127,12 @@ def _obliquity2D(nt, nr, dt, dr, rho, vel, nffts, critical=100., ntaper=10,
 
     """
     # create Fourier operator
-    FFTop = FFT2D(dims=[nr, nt], nffts=nffts, sampling=[dr, dt],
-                  dtype=dtype)
+    FFTop = FFT2D(dims=[nr, nt], nffts=nffts, sampling=[dr, dt], dtype=dtype)
 
     # create obliquity operator
-    [Kx, F] = np.meshgrid(FFTop.f1, FFTop.f2, indexing='ij')
+    [Kx, F] = np.meshgrid(FFTop.f1, FFTop.f2, indexing="ij")
     k = F / vel
-    Kz = np.sqrt((k ** 2 - Kx ** 2).astype(dtype))
+    Kz = np.sqrt((k**2 - Kx**2).astype(dtype))
     Kz[np.isnan(Kz)] = 0
 
     if composition:
@@ -116,8 +149,21 @@ def _obliquity2D(nt, nr, dt, dr, rho, vel, nffts, critical=100., ntaper=10,
     return FFTop, OBLop
 
 
-def _obliquity3D(nt, nr, dt, dr, rho, vel, nffts, critical=100., ntaper=10,
-                 composition=True, backend='numpy', dtype='complex128'):
+def _obliquity3D(
+    nt: int,
+    nr: int | Sequence[int],
+    dt: float,
+    dr: float | Sequence[float],
+    rho: float,
+    vel: float,
+    nffts: InputDimsLike,
+    critical: float = 100.0,
+    ntaper: int = 10,
+    composition: bool = True,
+    fftengine: Tfftengine_ns = "scipy",
+    backend: Tfftengine_ncj = "numpy",
+    dtype: DTypeLike = "complex128",
+) -> tuple[LinearOperator, LinearOperator]:
     r"""3D Obliquity operator and FFT operator
 
     Parameters
@@ -146,6 +192,9 @@ def _obliquity3D(nt, nr, dt, dr, rho, vel, nffts, critical=100., ntaper=10,
     composition : :obj:`bool`, optional
         Create obliquity factor for composition (``True``) or
         decomposition (``False``)
+    fftengine : :obj:`str`, optional
+        Engine used for fft computation (``numpy`` or ``scipy``). Choose
+        ``numpy`` when working with cupy and jax arrays.
     backend : :obj:`str`, optional
         Backend used for creation of obliquity factor operator
         (``numpy`` or ``cupy``)
@@ -161,14 +210,18 @@ def _obliquity3D(nt, nr, dt, dr, rho, vel, nffts, critical=100., ntaper=10,
 
     """
     # create Fourier operator
-    FFTop = FFTND(dims=[nr[0], nr[1], nt], nffts=nffts,
-                  sampling=[dr[0], dr[1], dt], dtype=dtype)
+    FFTop = FFTND(
+        dims=[nr[0], nr[1], nt],
+        nffts=nffts,
+        sampling=[dr[0], dr[1], dt],
+        engine=fftengine,
+        dtype=dtype,
+    )
 
     # create obliquity operator
-    [Ky, Kx, F] = np.meshgrid(FFTop.fs[0], FFTop.fs[1], FFTop.fs[2],
-                              indexing='ij')
+    [Ky, Kx, F] = np.meshgrid(FFTop.fs[0], FFTop.fs[1], FFTop.fs[2], indexing="ij")
     k = F / vel
-    Kz = np.sqrt((k ** 2 - Ky ** 2 - Kx ** 2).astype(dtype))
+    Kz = np.sqrt((k**2 - Ky**2 - Kx**2).astype(dtype))
     Kz[np.isnan(Kz)] = 0
     if composition:
         OBL = Kz / (rho * np.abs(F))
@@ -184,15 +237,27 @@ def _obliquity3D(nt, nr, dt, dr, rho, vel, nffts, critical=100., ntaper=10,
     return FFTop, OBLop
 
 
-def PressureToVelocity(nt, nr, dt, dr, rho, vel, nffts=(None, None, None),
-                       critical=100., ntaper=10, topressure=False,
-                       backend='numpy', dtype='complex128'):
+def PressureToVelocity(
+    nt: int,
+    nr: int,
+    dt: float,
+    dr: float,
+    rho: float,
+    vel: float,
+    nffts: InputDimsLike | tuple[None, None, None] = (None, None, None),
+    critical: float = 100.0,
+    ntaper: int = 10,
+    topressure: bool = False,
+    backend: Tfftengine_ncj = "numpy",
+    dtype: DTypeLike = "complex128",
+    name: str = "P",
+) -> LinearOperator:
     r"""Pressure to Vertical velocity conversion.
 
     Apply conversion from pressure to vertical velocity seismic wavefield
     (or vertical velocity to pressure). The input model and data required by
     the operator should be created by flattening the a wavefield of size
-    :math:`(\lbrack n_{r_y}) \times n_{r_x} \times n_t \rbrack`.
+    :math:`(\lbrack n_{r_y} \times n_{r_x} \times n_t \rbrack`.
 
     Parameters
     ----------
@@ -205,15 +270,15 @@ def PressureToVelocity(nt, nr, dt, dr, rho, vel, nffts=(None, None, None),
     dr : :obj:`float` or :obj:`tuple`
         Sampling(s) along the receiver array
     rho : :obj:`float`
-        Density along the receiver array (must be constant)
+        Density :math:`\rho` along the receiver array (must be constant)
     vel : :obj:`float`
-        Velocity along the receiver array (must be constant)
+        Velocity :math:`c` along the receiver array (must be constant)
     nffts : :obj:`tuple`, optional
         Number of samples along the wavenumber and frequency axes
     critical : :obj:`float`, optional
         Percentage of angles to retain in obliquity factor. For example, if
         ``critical=100`` only angles below the critical angle
-        :math:`\sqrt{k_y^2 + k_x^2} < \frac{\omega}{vel}` will be retained
+        :math:`\sqrt{k_y^2 + k_x^2} < \frac{\omega}{c}` will be retained
     ntaper : :obj:`float`, optional
         Number of samples of taper applied to obliquity factor around critical
         angle
@@ -225,6 +290,10 @@ def PressureToVelocity(nt, nr, dt, dr, rho, vel, nffts=(None, None, None),
         (``numpy`` or ``cupy``)
     dtype : :obj:`str`, optional
         Type of elements in input array.
+    name : :obj:`str`, optional
+        .. versionadded:: 2.0.0
+
+        Name of operator (to be used by :func:`pylops.utils.describe.describe`)
 
     Returns
     -------
@@ -240,26 +309,26 @@ def PressureToVelocity(nt, nr, dt, dr, rho, vel, nffts=(None, None, None),
 
     Notes
     -----
-    A pressure wavefield (:math:`p(x, t)`) can be converted into an equivalent
-    vertical particle velocity wavefield (:math:`v_z(x, t)`) by applying
+    A pressure wavefield :math:`p(x, t)` can be converted into an equivalent
+    vertical particle velocity wavefield :math:`v_z(x, t)` by applying
     the following frequency-wavenumber dependant scaling [1]_:
 
     .. math::
-        v_z(k_x, \omega) = \frac{k_z}{\omega \rho} p(k_x, \omega)
+        \hat{v}_z(k_x, \omega) = \frac{k_z}{\omega \rho} \hat{p}(k_x, \omega)
 
     where the vertical wavenumber :math:`k_z` is defined as
-    :math:`k_z=\sqrt{\omega^2/c^2 - k_x^2}`.
+    :math:`k_z=\sqrt{\frac{\omega^2}{c^2} - k_x^2}`.
 
     Similarly a vertical particle velocity can be converted into an equivalent
     pressure wavefield by applying the following frequency-wavenumber
     dependant scaling [1]_:
 
     .. math::
-        p(k_x, \omega) = \frac{\omega \rho}{k_z} v_z(k_x, \omega)
+        \hat{p}(k_x, \omega) = \frac{\omega \rho}{k_z} \hat{v}_z(k_x, \omega)
 
     For 3-dimensional applications the only difference is represented
     by the vertical wavenumber :math:`k_z`, which is defined as
-    :math:`k_z=\sqrt{\omega^2/c^2 - k_x^2 - k_y^2}`.
+    :math:`k_z=\sqrt{\frac{\omega^2}{c^2} - k_x^2 - k_y^2}`.
 
     In both cases, this operator is implemented as a concatanation of
     a 2 or 3-dimensional forward FFT (:class:`pylops.signalprocessing.FFT2` or
@@ -273,28 +342,55 @@ def PressureToVelocity(nt, nr, dt, dr, rho, vel, nffts=(None, None, None),
     """
     if isinstance(nr, int):
         obl = _obliquity2D
-        nffts = (int(nffts[0]) if nffts[0] is not None else nr,
-                 int(nffts[1]) if nffts[1] is not None else nt)
+        nffts = (
+            int(nffts[0]) if nffts[0] is not None else nr,
+            int(nffts[1]) if nffts[1] is not None else nt,
+        )
     else:
         obl = _obliquity3D
-        nffts = (int(nffts[0]) if nffts[0] is not None else nr[0],
-                 int(nffts[1]) if nffts[1] is not None else nr[1],
-                 int(nffts[2]) if nffts[2] is not None else nt)
+        nffts = (
+            int(nffts[0]) if nffts[0] is not None else nr[0],
+            int(nffts[1]) if nffts[1] is not None else nr[1],
+            int(nffts[2]) if nffts[2] is not None else nt,
+        )
 
     # create obliquity operator
-    FFTop, OBLop = \
-        obl(nt, nr, dt, dr, rho, vel, nffts=nffts,
-            critical=critical, ntaper=ntaper, composition=not topressure,
-            backend=backend, dtype=dtype)
+    FFTop, OBLop = obl(
+        nt,
+        nr,
+        dt,
+        dr,
+        rho,
+        vel,
+        nffts=nffts,
+        critical=critical,
+        ntaper=ntaper,
+        composition=not topressure,
+        backend=backend,
+        dtype=dtype,
+    )
 
     # create conversion operator
     Cop = FFTop.H * OBLop * FFTop
+    Cop.name = name
     return Cop
 
 
-def UpDownComposition2D(nt, nr, dt, dr, rho, vel, nffts=(None, None),
-                        critical=100., ntaper=10, scaling=1., backend='numpy',
-                        dtype='complex128'):
+def UpDownComposition2D(
+    nt: int,
+    nr: int,
+    dt: float,
+    dr: float,
+    rho: float,
+    vel: float,
+    nffts: InputDimsLike | tuple[None, None] = (None, None),
+    critical: float = 100.0,
+    ntaper: int = 10,
+    scaling: float = 1.0,
+    backend: Tfftengine_ncj = "numpy",
+    dtype: DTypeLike = "complex128",
+    name: str = "U",
+) -> LinearOperator:
     r"""2D Up-down wavefield composition.
 
     Apply multi-component seismic wavefield composition from its
@@ -317,15 +413,15 @@ def UpDownComposition2D(nt, nr, dt, dr, rho, vel, nffts=(None, None),
     dr : :obj:`float`
         Sampling along the receiver array
     rho : :obj:`float`
-        Density along the receiver array (must be constant)
+        Density :math:`\rho` along the receiver array (must be constant)
     vel : :obj:`float`
-        Velocity along the receiver array (must be constant)
+        Velocity :math:`c` along the receiver array (must be constant)
     nffts : :obj:`tuple`, optional
         Number of samples along the wavenumber and frequency axes
     critical : :obj:`float`, optional
         Percentage of angles to retain in obliquity factor. For example, if
         ``critical=100`` only angles below the critical angle
-        :math:`|k_x| < \frac{f(k_x)}{vel}` will be retained
+        :math:`|k_x| < \frac{f(k_x)}{c}` will be retained
         will be retained
     ntaper : :obj:`float`, optional
         Number of samples of taper applied to obliquity factor around critical
@@ -337,6 +433,10 @@ def UpDownComposition2D(nt, nr, dt, dr, rho, vel, nffts=(None, None),
         (``numpy`` or ``cupy``)
     dtype : :obj:`str`, optional
         Type of elements in input array.
+    name : :obj:`str`, optional
+        .. versionadded:: 2.0.0
+
+        Name of operator (to be used by :func:`pylops.utils.describe.describe`)
 
     Returns
     -------
@@ -350,7 +450,7 @@ def UpDownComposition2D(nt, nr, dt, dr, rho, vel, nffts=(None, None),
 
     Notes
     -----
-    Multi-component seismic data (:math:`p(x, t)` and :math:`v_z(x, t)`) can be
+    Multi-component seismic data :math:`p(x, t)` and :math:`v_z(x, t)` can be
     synthesized in the frequency-wavenumber domain
     as the superposition of the up- and downgoing constituents of
     the pressure wavefield (:math:`p^-(x, t)` and :math:`p^+(x, t)`)
@@ -358,20 +458,20 @@ def UpDownComposition2D(nt, nr, dt, dr, rho, vel, nffts=(None, None),
 
     .. math::
         \begin{bmatrix}
-            \mathbf{p}(k_x, \omega)  \\
-            \mathbf{v_z}(k_x, \omega)
-        \end{bmatrix} =
+            \hat{p}  \\
+            \hat{v_z}
+        \end{bmatrix}(k_x, \omega) =
         \begin{bmatrix}
             1  & 1 \\
             \frac{k_z}{\omega \rho}  & - \frac{k_z}{\omega \rho}  \\
         \end{bmatrix}
         \begin{bmatrix}
-            \mathbf{p^+}(k_x, \omega)  \\
-            \mathbf{p^-}(k_x, \omega)
-        \end{bmatrix}
+            \hat{p^+}  \\
+            \hat{p^-}
+        \end{bmatrix}(k_x, \omega)
 
     where the vertical wavenumber :math:`k_z` is defined as
-    :math:`k_z=\sqrt{\omega^2/c^2 - k_x^2}`.
+    :math:`k_z=\sqrt{\frac{\omega^2}{c^2} - k_x^2}`.
 
     We can write the entire composition process in a compact
     matrix-vector notation as follows:
@@ -379,11 +479,11 @@ def UpDownComposition2D(nt, nr, dt, dr, rho, vel, nffts=(None, None),
     .. math::
         \begin{bmatrix}
             \mathbf{p}  \\
-            s*\mathbf{v_z}
+            s\mathbf{v_z}
         \end{bmatrix} =
         \begin{bmatrix}
             \mathbf{F} & 0 \\
-            0 & s*\mathbf{F}
+            0 & s\mathbf{F}
         \end{bmatrix} \begin{bmatrix}
             \mathbf{I} & \mathbf{I} \\
             \mathbf{W}^+ & \mathbf{W}^-
@@ -409,29 +509,64 @@ def UpDownComposition2D(nt, nr, dt, dr, rho, vel, nffts=(None, None),
        Geophysics, vol. 63, pp. 1795-1798. 1998.
 
     """
-    nffts = (int(nffts[0]) if nffts[0] is not None else nr,
-             int(nffts[1]) if nffts[1] is not None else nt)
+    nffts = (
+        int(nffts[0]) if nffts[0] is not None else nr,
+        int(nffts[1]) if nffts[1] is not None else nt,
+    )
 
     # create obliquity operator
-    FFTop, OBLop, = \
-        _obliquity2D(nt, nr, dt, dr, rho, vel,
-                     nffts=nffts,
-                     critical=critical, ntaper=ntaper,
-                     composition=True, backend=backend,
-                     dtype=dtype)
+    (
+        FFTop,
+        OBLop,
+    ) = _obliquity2D(
+        nt,
+        nr,
+        dt,
+        dr,
+        rho,
+        vel,
+        nffts=nffts,
+        critical=critical,
+        ntaper=ntaper,
+        composition=True,
+        backend=backend,
+        dtype=dtype,
+    )
 
     # create up-down modelling operator
-    UDop = (BlockDiag([FFTop.H, scaling*FFTop.H]) * \
-            Block([[Identity(nffts[0]*nffts[1], dtype=dtype),
-                    Identity(nffts[0]*nffts[1], dtype=dtype)],
-                   [OBLop, -OBLop]]) * \
-            BlockDiag([FFTop, FFTop]))
+    UDop = (
+        BlockDiag([FFTop.H, scaling * FFTop.H])
+        * Block(
+            [
+                [
+                    Identity(nffts[0] * nffts[1], dtype=dtype),
+                    Identity(nffts[0] * nffts[1], dtype=dtype),
+                ],
+                [OBLop, -OBLop],
+            ]
+        )
+        * BlockDiag([FFTop, FFTop])
+    )
+    UDop.name = name
     return UDop
 
 
-def UpDownComposition3D(nt, nr, dt, dr, rho, vel, nffts=(None, None, None),
-                        critical=100., ntaper=10, scaling=1., backend='numpy',
-                        dtype='complex128'):
+def UpDownComposition3D(
+    nt: int,
+    nr: int,
+    dt: float,
+    dr: float,
+    rho: float,
+    vel: float,
+    nffts: InputDimsLike | tuple[None, None, None] = (None, None, None),
+    critical: float = 100.0,
+    ntaper: int = 10,
+    scaling: float = 1.0,
+    fftengine: Tfftengine_ns = "scipy",
+    backend: Tfftengine_ncj = "numpy",
+    dtype: DTypeLike = "complex128",
+    name: str = "U",
+) -> LinearOperator:
     r"""3D Up-down wavefield composition.
 
     Apply multi-component seismic wavefield composition from its
@@ -454,26 +589,35 @@ def UpDownComposition3D(nt, nr, dt, dr, rho, vel, nffts=(None, None, None),
     dr : :obj:`tuple`
         Samplings along the receiver array
     rho : :obj:`float`
-        Density along the receiver array (must be constant)
+        Density :math:`\rho` along the receiver array (must be constant)
     vel : :obj:`float`
-        Velocity along the receiver array (must be constant)
+        Velocity :math:`c` along the receiver array (must be constant)
     nffts : :obj:`tuple`, optional
         Number of samples along the wavenumbers and frequency axes (for the
         wavenumbers axes the same order as ``nr`` and ``dr`` must be followed)
     critical : :obj:`float`, optional
         Percentage of angles to retain in obliquity factor. For example, if
         ``critical=100`` only angles below the critical angle
-        :math:`\sqrt{k_y^2 + k_x^2} < \frac{\omega}{vel}` will be retained
+        :math:`\sqrt{k_y^2 + k_x^2} < \frac{\omega}{c}` will be retained
     ntaper : :obj:`float`, optional
         Number of samples of taper applied to obliquity factor around critical
         angle
     scaling : :obj:`float`, optional
         Scaling to apply to the operator (see Notes for more details)
+    fftengine : :obj:`str`, optional
+        .. versionadded:: 2.3.0
+
+        Engine used for fft computation (``numpy`` or ``scipy``). Choose
+        ``numpy`` when working with cupy and jax arrays.
     backend : :obj:`str`, optional
         Backend used for creation of obliquity factor operator
         (``numpy`` or ``cupy``)
     dtype : :obj:`str`, optional
         Type of elements in input array.
+    name : :obj:`str`, optional
+        .. versionadded:: 2.0.0
+
+        Name of operator (to be used by :func:`pylops.utils.describe.describe`)
 
     Returns
     -------
@@ -487,42 +631,78 @@ def UpDownComposition3D(nt, nr, dt, dr, rho, vel, nffts=(None, None, None),
 
     Notes
     -----
-    Multi-component seismic data (:math:`p(y, x, t)` and :math:`v_z(y, x, t)`)
+    Multi-component seismic data :math:`p(y, x, t)` and :math:`v_z(y, x, t)`
     can be synthesized in the frequency-wavenumber domain
     as the superposition of the up- and downgoing constituents of
     the pressure wavefield (:math:`p^-(y, x, t)` and :math:`p^+(y, x, t)`)
     as described :class:`pylops.waveeqprocessing.UpDownComposition2D`.
 
     Here the vertical wavenumber :math:`k_z` is defined as
-    :math:`k_z=\sqrt{\omega^2/c^2 - k_y^2 - k_x^2}`.
+    :math:`k_z=\sqrt{\frac{\omega^2}{c^2} - k_y^2 - k_x^2}`.
 
     """
-    nffts = (int(nffts[0]) if nffts[0] is not None else nr[0],
-             int(nffts[1]) if nffts[1] is not None else nr[1],
-             int(nffts[2]) if nffts[2] is not None else nt)
+    nffts = (
+        int(nffts[0]) if nffts[0] is not None else nr[0],
+        int(nffts[1]) if nffts[1] is not None else nr[1],
+        int(nffts[2]) if nffts[2] is not None else nt,
+    )
 
     # create obliquity operator
-    FFTop, OBLop = \
-        _obliquity3D(nt, nr, dt, dr, rho, vel,
-                     nffts=nffts,
-                     critical=critical, ntaper=ntaper,
-                     composition=True, backend=backend,
-                     dtype=dtype)
+    FFTop, OBLop = _obliquity3D(
+        nt,
+        nr,
+        dt,
+        dr,
+        rho,
+        vel,
+        nffts=nffts,
+        critical=critical,
+        ntaper=ntaper,
+        composition=True,
+        fftengine=fftengine,
+        backend=backend,
+        dtype=dtype,
+    )
 
     # create up-down modelling operator
-    UDop = (BlockDiag([FFTop.H, scaling * FFTop.H]) * \
-            Block([[Identity(nffts[0] * nffts[1] * nffts[2], dtype=dtype),
-                    Identity(nffts[0] * nffts[1] * nffts[2], dtype=dtype)],
-                   [OBLop, -OBLop]]) * \
-            BlockDiag([FFTop, FFTop]))
+    UDop = (
+        BlockDiag([FFTop.H, scaling * FFTop.H])
+        * Block(
+            [
+                [
+                    Identity(nffts[0] * nffts[1] * nffts[2], dtype=dtype),
+                    Identity(nffts[0] * nffts[1] * nffts[2], dtype=dtype),
+                ],
+                [OBLop, -OBLop],
+            ]
+        )
+        * BlockDiag([FFTop, FFTop])
+    )
+    UDop.name = name
     return UDop
 
 
-def WavefieldDecomposition(p, vz, nt, nr, dt, dr, rho, vel,
-                           nffts=(None, None, None), critical=100.,
-                           ntaper=10, scaling=1., kind='inverse',
-                           restriction=None, sptransf=None, solver=lsqr,
-                           dottest=False, dtype='complex128', **kwargs_solver):
+def WavefieldDecomposition(
+    p: NDArray,
+    vz: NDArray,
+    nt: int,
+    nr: int | InputDimsLike,
+    dt: float,
+    dr: float,
+    rho: float,
+    vel: float,
+    nffts: InputDimsLike | tuple[None, None, None] = (None, None, None),
+    critical: float = 100.0,
+    ntaper: int = 10,
+    scaling: float = 1.0,
+    kind: Literal["inverse", "analytical"] = "inverse",
+    restriction: LinearOperator | None = None,
+    sptransf: LinearOperator | None = None,
+    solver: Callable = lsqr,
+    dottest: bool = False,
+    dtype: DTypeLike = "complex128",
+    **kwargs_solver,
+) -> tuple[NDArray, NDArray]:
     r"""Up-down wavefield decomposition.
 
     Apply seismic wavefield decomposition from multi-component (pressure
@@ -531,14 +711,14 @@ def WavefieldDecomposition(p, vz, nt, nr, dt, dr, rho, vel,
 
     Parameters
     ----------
-    p : :obj:`np.ndarray`
-        Pressure data of size :math:`\lbrack n_{r_x} (\times n_{r_y})
-        \times n_t \rbrack` (or :math:`\lbrack n_{r_{x,sub}}
-        (\times n_{r_{y,sub}}) \times n_t \rbrack`
+    p : :obj:`numpy.ndarray`
+        Pressure data of size :math:`\lbrack n_{r_x} \,(\times n_{r_y})
+        \times n_t \rbrack` (or :math:`\lbrack n_{r_{x,\text{sub}}}
+        \,(\times n_{r_{y,\text{sub}}}) \times n_t \rbrack`
         in case a ``restriction`` operator is provided. Note that
-        :math:`n_{r_{x,sub}}` (and :math:`n_{r_{y,sub}}`)
-        must agree with the size of the output of this operator)
-    vz : :obj:`np.ndarray`
+        :math:`n_{r_{x,\text{sub}}}` (and :math:`n_{r_{y,\text{sub}}}`)
+        must agree with the size of the output of this operator.)
+    vz : :obj:`numpy.ndarray`
         Vertical particle velocity data of same size as pressure data
     nt : :obj:`int`
         Number of samples along the time axis
@@ -549,14 +729,14 @@ def WavefieldDecomposition(p, vz, nt, nr, dt, dr, rho, vel,
     dr : :obj:`float` or :obj:`tuple`
         Sampling along the receiver array (or axes)
     rho : :obj:`float`
-        Density along the receiver array (must be constant)
+        Density :math:`\rho` along the receiver array (must be constant)
     vel : :obj:`float`
-        Velocity along the receiver array (must be constant)
+        Velocity :math:`c` along the receiver array (must be constant)
     nffts : :obj:`tuple`, optional
         Number of samples along the wavenumber and frequency axes
     critical : :obj:`float`, optional
         Percentage of angles to retain in obliquity factor. For example, if
-        ``critical=100`` only angles below the critical angle :math:`\frac{f(k_x)}{v}`
+        ``critical=100`` only angles below the critical angle :math:`\frac{f(k_x)}{c}`
         will be retained
     ntaper : :obj:`float`, optional
         Number of samples of taper applied to obliquity factor around critical
@@ -582,9 +762,9 @@ def WavefieldDecomposition(p, vz, nt, nr, dt, dr, rho, vel,
 
     Returns
     -------
-    pup : :obj:`np.ndarray`
+    pup : :obj:`numpy.ndarray`
         Up-going wavefield
-    pdown : :obj:`np.ndarray`
+    pdown : :obj:`numpy.ndarray`
         Down-going wavefield
 
     Raises
@@ -594,27 +774,27 @@ def WavefieldDecomposition(p, vz, nt, nr, dt, dr, rho, vel,
 
     Notes
     -----
-    Up- and down-going components of seismic data (:math:`p^-(x, t)`
-    and :math:`p^+(x, t)`) can be estimated from multi-component data
-    (:math:`p(x, t)` and :math:`v_z(x, t)`) by computing the following
+    Up- and down-going components of seismic data :math:`p^-(x, t)`
+    and :math:`p^+(x, t)` can be estimated from multi-component data
+    :math:`p(x, t)` and :math:`v_z(x, t)` by computing the following
     expression [1]_:
 
     .. math::
         \begin{bmatrix}
-            \mathbf{p^+}(k_x, \omega)  \\
-            \mathbf{p^-}(k_x, \omega)
-        \end{bmatrix} = \frac{1}{2}
+            \hat{p}^+  \\
+            \hat{p}^-
+        \end{bmatrix}(k_x, \omega) = \frac{1}{2}
         \begin{bmatrix}
             1  & \frac{\omega \rho}{k_z} \\
             1  & - \frac{\omega \rho}{k_z}  \\
         \end{bmatrix}
         \begin{bmatrix}
-            \mathbf{p}(k_x, \omega)  \\
-            \mathbf{v_z}(k_x, \omega)
-        \end{bmatrix}
+            \hat{p}  \\
+            \hat{v}_z
+        \end{bmatrix}(k_x, \omega)
 
     if ``kind='analytical'`` or alternatively by solving the equation in
-    :func:`ptcpy.waveeqprocessing.UpDownComposition2D` as an inverse problem,
+    :func:`pylops.waveeqprocessing.UpDownComposition2D` as an inverse problem,
     if ``kind='inverse'``.
 
     The latter approach has several advantages as data regularization
@@ -624,19 +804,19 @@ def WavefieldDecomposition(p, vz, nt, nr, dt, dr, rho, vel,
     .. math::
         \begin{bmatrix}
             \mathbf{p}  \\
-            s*\mathbf{v_z}
+            s\mathbf{v_z}
         \end{bmatrix} =
         \begin{bmatrix}
             \mathbf{R}\mathbf{F} & 0 \\
-            0 & s*\mathbf{R}\mathbf{F}
+            0 & s\mathbf{R}\mathbf{F}
         \end{bmatrix} \mathbf{W} \begin{bmatrix}
             \mathbf{F}^H \mathbf{S} & 0 \\
             0 & \mathbf{F}^H \mathbf{S}
         \end{bmatrix}  \mathbf{p^{\pm}}
 
-    where :math:`\mathbf{R}` is a :class:`ptcpy.basicoperators.Restriction`
+    where :math:`\mathbf{R}` is a :class:`pylops.basicoperators.Restriction`
     operator and :math:`\mathbf{S}` is sparsyfing transform operator (e.g.,
-    :class:`ptcpy.signalprocessing.Radon2D`).
+    :class:`pylops.signalprocessing.Radon2D`).
 
     .. [1] Wapenaar, K. "Reciprocity properties of one-way propagators",
        Geophysics, vol. 63, pp. 1795-1798. 1998.
@@ -658,16 +838,25 @@ def WavefieldDecomposition(p, vz, nt, nr, dt, dr, rho, vel,
         nr2 = nr[0]
         decomposition = _obliquity3D
         composition = UpDownComposition3D
-    if kind == 'analytical':
-        FFTop, OBLop = \
-            decomposition(nt, nr, dt, dr, rho, vel,
-                          nffts=nffts, critical=critical,
-                          ntaper=ntaper, composition=False,
-                          backend=backend, dtype=dtype)
-        VZ = FFTop * vz.ravel()
+    if kind == "analytical":
+        FFTop, OBLop = decomposition(
+            nt,
+            nr,
+            dt,
+            dr,
+            rho,
+            vel,
+            nffts=nffts,
+            critical=critical,
+            ntaper=ntaper,
+            composition=False,
+            backend=backend,
+            dtype=dtype,
+        )
+        VZ: NDArray = FFTop * vz.ravel()
 
         # scaled Vz
-        VZ_obl = OBLop * VZ
+        VZ_obl: NDArray = OBLop * VZ
         vz_obl = FFTop.H * VZ_obl
         vz_obl = ncp.real(vz_obl.reshape(dims))
 
@@ -675,20 +864,36 @@ def WavefieldDecomposition(p, vz, nt, nr, dt, dr, rho, vel,
         pup = (p - vz_obl) / 2
         pdown = (p + vz_obl) / 2
 
-    elif kind == 'inverse':
-        d = ncp.concatenate((p.ravel(), scaling*vz.ravel()))
-        UDop = \
-            composition(nt, nr, dt, dr, rho, vel, nffts=nffts,
-                        critical=critical, ntaper=ntaper,
-                        scaling=scaling, backend=backend, dtype=dtype)
+    elif kind == "inverse":
+        d = ncp.concatenate((p.ravel(), scaling * vz.ravel()))
+        UDop = composition(
+            nt,
+            nr,
+            dt,
+            dr,
+            rho,
+            vel,
+            nffts=nffts,
+            critical=critical,
+            ntaper=ntaper,
+            scaling=scaling,
+            backend=backend,
+            dtype=dtype,
+        )
         if restriction is not None:
             UDop = restriction * UDop
         if sptransf is not None:
             UDop = UDop * BlockDiag([sptransf, sptransf])
             UDop.dtype = ncp.real(ncp.ones(1, UDop.dtype)).dtype
         if dottest:
-            Dottest(UDop, UDop.shape[0], UDop.shape[1],
-                    complexflag=2, backend=backend, verb=True)
+            Dottest(
+                UDop,
+                UDop.shape[0],
+                UDop.shape[1],
+                complexflag=2,
+                backend=backend,
+                verb=True,
+            )
 
         # separation by inversion
         dud = solver(UDop, d.ravel(), **kwargs_solver)[0]
@@ -699,6 +904,7 @@ def WavefieldDecomposition(p, vz, nt, nr, dt, dr, rho, vel,
         dud = dud.reshape(dims2)
         pdown, pup = dud[:nr2], dud[nr2:]
     else:
-        raise KeyError('kind must be analytical or inverse')
+        msg = f"kind must be either 'analytical' or 'inverse', got {kind}"
+        raise KeyError(msg)
 
     return pup, pdown

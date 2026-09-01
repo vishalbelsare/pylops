@@ -16,20 +16,24 @@ db.sqlite3
 build
 dist
 pylops.egg-info/
+.eggs/
+__pycache__
 
-# setuptools_scm generated  #
+# hatchling generated  #
 pylops/version.py
 
 # Development #
 .ipynb_checkpoints/
 notebooks
 TODO
+.vscode/
 
 # Documentation #
 docs/build
 docs/source/api/generated
 docs/source/gallery
 docs/source/tutorials
+docs/source/sg_execution_times.rst
 
 # Pylint #
 pylint_plot.py
@@ -46,3 +50,6 @@ ASV
 .asv/
 asv.conf.json
 benchmarks/
+
+# Virtual Environments
+.venv**

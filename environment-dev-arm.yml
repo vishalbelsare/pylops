@@ -1,0 +1,44 @@
+name: pylops
+channels:
+  - defaults
+  - conda-forge
+  - numba
+dependencies:
+  - python>=3.11.0
+  - pip
+  - numpy>=2.0.0
+  - scipy>=1.13.0
+  - pyfftw
+  - pywavelets
+  - sympy
+  - pymc>=5
+  - pytensor
+  - astra-toolbox>=2.2.0
+  - matplotlib
+  - ipython
+  - pytest
+  - Sphinx
+  - numpydoc
+  - numba
+  - pre-commit
+  - autopep8
+  - pip:
+    - torch
+    - curvelets>=1.2
+    - devito
+    # - dtcwt (until numpy>=2.0.0 is supported)
+    - scikit-fmm
+    - spgl1
+    - jax
+    - pytest-runner
+    - shibuya
+    - sphinx-design
+    - sphinx-gallery
+    - sphinx-iconify
+    - pooch
+    - nbsphinx
+    - sphinxemoji
+    - image
+    - ruff
+    - mypy
+    - coverage

@@ -1,21 +1,120 @@
-from .FFT import FFT
-from .FFT2D import FFT2D
-from .FFTND import FFTND
-from .Convolve1D import Convolve1D
-from .ConvolveND import ConvolveND
-from .Convolve2D import Convolve2D
-from .Interp import Interp
-from .Bilinear import Bilinear
-from .Radon2D import Radon2D
-from .Radon3D import Radon3D
-from .Sliding1D import Sliding1D
-from .Sliding2D import Sliding2D
-from .Sliding3D import Sliding3D
-from .Patch2D import Patch2D
-from .Fredholm1 import Fredholm1
-from .DWT import DWT
-from .DWT2D import DWT2D
-from .Seislet import Seislet
-from .ChirpRadon2D import ChirpRadon2D
-from .ChirpRadon3D import ChirpRadon3D
-from .Shift import Shift
+"""
+Signal processing
+=================
+
+The subpackage signalprocessing provides linear operators for several signal
+processing algorithms with forward and adjoint functionalities.
+
+A list of operators present in pylops.signalprocessing:
+
+    Convolve1D                      1D convolution operator.
+    Convolve2D                      2D convolution operator.
+    ConvolveND                      ND convolution operator.
+    NonStationaryConvolve1D         1D nonstationary convolution operator.
+    NonStationaryConvolve2D         2D nonstationary convolution operator.
+    NonStationaryConvolve3D         3D nonstationary convolution operator.
+    NonStationaryFilters1D          1D nonstationary filter estimation operator.
+    NonStationaryFilters2D          2D nonstationary filter estimation operator.
+    Interp                          Interpolation operator.
+    InterpCubicSpline               Cubic Spline Interpolation operator.
+    Bilinear                        Bilinear interpolation operator.
+    FFT                             One dimensional Fast-Fourier Transform.
+    FFT2D                           Two dimensional Fast-Fourier Transform.
+    FFTND                           N-dimensional Fast-Fourier Transform.
+    Shift                           Fractional Shift operator.
+    DWT                             One dimensional Wavelet operator.
+    DWT2D                           Two dimensional Wavelet operator.
+    DWTND                           N-dimensional Wavelet operator.
+    DCT                             Discrete Cosine Transform.
+    DTCWT                           Dual-Tree Complex Wavelet Transform.
+    UDCT                            Uniform Discrete Curvelet Transform.
+    Radon2D	                        Two dimensional Radon transform.
+    Radon3D	                        Three dimensional Radon transform.
+    FourierRadon2D	                Two dimensional Fourier Radon transform.
+    FourierRadon3D	                Three dimensional Fourier Radon transform.
+    ChirpRadon2D	                Two dimensional Chirp Radon transform.
+    ChirpRadon3D	                Three dimensional Chirp Radon transform.
+    PWSprayer2D                     2D Plane-Wave Spraying operator.
+    PWSmoother2D                    2D Plane-Wave Smoothing operator.
+    Seislet                         Two dimensional Seislet operator.
+    Sliding1D                       1D Sliding transform operator.
+    Sliding2D                       2D Sliding transform operator.
+    Sliding3D                       3D Sliding transform operator.
+    Patch2D                         2D Patching transform operator.
+    Patch3D                         3D Patching transform operator.
+    Fredholm1                       Fredholm integral of first kind.
+
+"""
+
+from .fft import *
+from .fft2d import *
+from .fftnd import *
+from .convolve1d import *
+from .convolvend import *
+from .convolve2d import *
+from .nonstatconvolve1d import *
+from .nonstatconvolve2d import *
+from .nonstatconvolve3d import *
+from .shift import *
+from .interp import *
+from .interpspline import *
+from .bilinear import *
+from .radon2d import *
+from .radon3d import *
+from .fourierradon2d import *
+from .fourierradon3d import *
+from .chirpradon2d import *
+from .chirpradon3d import *
+from .sliding1d import *
+from .sliding2d import *
+from .sliding3d import *
+from .patch2d import *
+from .patch3d import *
+from .fredholm1 import *
+from .dwt import *
+from .dwt2d import *
+from .dwtnd import *
+from .seislet import *
+from .dct import *
+from .dtcwt import *
+from .pwd2d import *
+from .udct import *
+
+__all__ = [
+    "FFT",
+    "FFT2D",
+    "FFTND",
+    "Shift",
+    "Convolve1D",
+    "ConvolveND",
+    "Convolve2D",
+    "NonStationaryConvolve1D",
+    "NonStationaryConvolve2D",
+    "NonStationaryConvolve3D",
+    "NonStationaryFilters1D",
+    "NonStationaryFilters2D",
+    "Interp",
+    "InterpCubicSpline",
+    "Bilinear",
+    "Radon2D",
+    "Radon3D",
+    "FourierRadon2D",
+    "FourierRadon3D",
+    "ChirpRadon2D",
+    "ChirpRadon3D",
+    "Sliding1D",
+    "Sliding2D",
+    "Sliding3D",
+    "Patch2D",
+    "Patch3D",
+    "Fredholm1",
+    "DWT",
+    "DWT2D",
+    "DWTND",
+    "Seislet",
+    "DCT",
+    "DTCWT",
+    "PWSprayer2D",
+    "PWSmoother2D",
+    "UDCT",
+]

@@ -1,0 +1,292 @@
+__all__ = ["FirstDerivative"]
+
+from collections.abc import Callable
+from typing import Literal
+
+import numpy as np
+
+from pylops import LinearOperator
+from pylops.utils._internal import _value_or_sized_to_tuple
+from pylops.utils.backend import (
+    get_array_module,
+    get_normalize_axis_index,
+    inplace_add,
+    inplace_set,
+)
+from pylops.utils.decorators import reshaped
+from pylops.utils.typing import DTypeLike, InputDimsLike, NDArray, Tderivkind
+
+
+class FirstDerivative(LinearOperator):
+    r"""First derivative.
+
+    Apply a first derivative using a multiple-point stencil finite-difference
+    approximation along ``axis``.
+
+    Parameters
+    ----------
+    dims : :obj:`list` or :obj:`int`
+        Number of samples for each dimension
+    axis : :obj:`int`, optional
+        .. versionadded:: 2.0.0
+
+        Axis along which derivative is applied.
+    sampling : :obj:`float`, optional
+        Sampling step :math:`\Delta x`.
+    kind : :obj:`str`, optional
+        Derivative kind (``forward``, ``centered``, or ``backward``).
+    edge : :obj:`bool`, optional
+        Use reduced order derivative at edges (``True``) or
+        ignore them (``False``). This is currently only available
+        for centered derivative
+    order : :obj:`int`, optional
+        .. versionadded:: 2.0.0
+
+        Derivative order (``3`` or ``5``). This is currently only available
+        for centered derivative
+    dtype : :obj:`str`, optional
+        Type of elements in input array.
+    name : :obj:`str`, optional
+        .. versionadded:: 2.0.0
+
+        Name of operator (to be used by :func:`pylops.utils.describe.describe`)
+
+    Attributes
+    ----------
+    dims : :obj:`tuple`
+        Shape of the array after the adjoint, but before flattening.
+
+        For example, ``x_reshaped = (Op.H * y.ravel()).reshape(Op.dims)``.
+    dimsd : :obj:`tuple`
+        Shape of the array after the forward, but before flattening. In
+        this case, same as ``dims``.
+    shape : :obj:`tuple`
+        Operator shape.
+
+    Notes
+    -----
+    The FirstDerivative operator applies a first derivative to any chosen
+    direction of a multi-dimensional array using either a second- or third-order
+    centered stencil or first-order forward/backward stencils.
+
+    For simplicity, given a one dimensional array, the second-order centered
+    first derivative is:
+
+    .. math::
+        y[i] = (0.5x[i+1] - 0.5x[i-1]) / \Delta x
+
+    while the first-order forward stencil is:
+
+    .. math::
+        y[i] = (x[i+1] - x[i]) / \Delta x
+
+    and the first-order backward stencil is:
+
+    .. math::
+        y[i] = (x[i] - x[i-1]) / \Delta x
+
+    Formulas for the third-order centered stencil can be found at
+    this `link <https://en.wikipedia.org/wiki/Finite_difference_coefficient>`_.
+
+    """
+
+    def __init__(
+        self,
+        dims: int | InputDimsLike,
+        axis: int = -1,
+        sampling: float = 1.0,
+        kind: Tderivkind = "centered",
+        edge: bool = False,
+        order: Literal[3, 5] = 3,
+        dtype: DTypeLike = "float64",
+        name: str = "F",
+    ) -> None:
+        dims = _value_or_sized_to_tuple(dims)
+        super().__init__(dtype=np.dtype(dtype), dims=dims, dimsd=dims, name=name)
+
+        self.axis = get_normalize_axis_index()(axis, len(self.dims))
+        self.sampling = sampling
+        self.kind = kind
+        self.edge = edge
+        self.order = order
+        self._slice = {
+            i: {
+                j: tuple([slice(None, None)] * (len(dims) - 1) + [slice(i, j)])
+                for j in (None, -1, -2, -3, -4)
+            }
+            for i in (None, 1, 2, 3, 4)
+        }
+        self._sample = {
+            i: tuple([slice(None, None)] * (len(dims) - 1) + [i]) for i in range(-3, 4)
+        }
+        self._register_multiplications(self.kind, self.order)
+
+    def _register_multiplications(
+        self,
+        kind: Tderivkind,
+        order: Literal[3, 5],
+    ) -> None:
+        # choose _matvec and _rmatvec kind
+        self._hmatvec: Callable
+        self._hrmatvec: Callable
+        if kind == "forward":
+            self._hmatvec = self._matvec_forward
+            self._hrmatvec = self._rmatvec_forward
+        elif kind == "centered":
+            if order == 3:
+                self._hmatvec = self._matvec_centered3
+                self._hrmatvec = self._rmatvec_centered3
+            elif order == 5:
+                self._hmatvec = self._matvec_centered5
+                self._hrmatvec = self._rmatvec_centered5
+            else:
+                msg = "order must be '3', or '5'"
+                raise NotImplementedError(msg)
+        elif kind == "backward":
+            self._hmatvec = self._matvec_backward
+            self._hrmatvec = self._rmatvec_backward
+        else:
+            msg = "kind must be 'forward', 'centered', or 'backward'"
+            raise NotImplementedError(msg)
+
+    def _matvec(self, x: NDArray) -> NDArray:
+        return self._hmatvec(x)
+
+    def _rmatvec(self, x: NDArray) -> NDArray:
+        return self._hrmatvec(x)
+
+    @reshaped(swapaxis=True)
+    def _matvec_forward(self, x: NDArray) -> NDArray:
+        ncp = get_array_module(x)
+        y = ncp.zeros(x.shape, self.dtype)
+        # y[..., :-1] = (x[..., 1:] - x[..., :-1]) / self.sampling
+        y = inplace_set(
+            (x[..., 1:] - x[..., :-1]) / self.sampling, y, self._slice[None][-1]
+        )
+        return y
+
+    @reshaped(swapaxis=True)
+    def _rmatvec_forward(self, x: NDArray) -> NDArray:
+        ncp = get_array_module(x)
+        y = ncp.zeros(x.shape, self.dtype)
+        # y[..., :-1] -= x[..., :-1]
+        y = inplace_add(-x[..., :-1], y, self._slice[None][-1])
+        # y[..., 1:] += x[..., :-1]
+        y = inplace_add(x[..., :-1], y, self._slice[1][None])
+        y /= self.sampling
+        return y
+
+    @reshaped(swapaxis=True)
+    def _matvec_centered3(self, x: NDArray) -> NDArray:
+        ncp = get_array_module(x)
+        y = ncp.zeros(x.shape, self.dtype)
+        # y[..., 1:-1] = 0.5 * (x[..., 2:] - x[..., :-2])
+        y = inplace_set(0.5 * (x[..., 2:] - x[..., :-2]), y, self._slice[1][-1])
+        if self.edge:
+            # y[..., 0] = x[..., 1] - x[..., 0]
+            y = inplace_set(x[..., 1] - x[..., 0], y, self._sample[0])
+            # y[..., -1] = x[..., -1] - x[..., -2]
+            y = inplace_set(x[..., -1] - x[..., -2], y, self._sample[-1])
+        y /= self.sampling
+        return y
+
+    @reshaped(swapaxis=True)
+    def _rmatvec_centered3(self, x: NDArray) -> NDArray:
+        ncp = get_array_module(x)
+        y = ncp.zeros(x.shape, self.dtype)
+        # y[..., :-2] -= 0.5 * x[..., 1:-1]
+        y = inplace_add(-0.5 * x[..., 1:-1], y, self._slice[None][-2])
+        # y[..., 2:] += 0.5 * x[..., 1:-1]
+        y = inplace_add(0.5 * x[..., 1:-1], y, self._slice[2][None])
+        if self.edge:
+            # y[..., 0] -= x[..., 0]
+            y = inplace_add(-x[..., 0], y, self._sample[0])
+            # y[..., 1] += x[..., 0]
+            y = inplace_add(x[..., 0], y, self._sample[1])
+            # y[..., -2] -= x[..., -1]
+            y = inplace_add(-x[..., -1], y, self._sample[-2])
+            # y[..., -1] += x[..., -1]
+            y = inplace_add(x[..., -1], y, self._sample[-1])
+        y /= self.sampling
+        return y
+
+    @reshaped(swapaxis=True)
+    def _matvec_centered5(self, x: NDArray) -> NDArray:
+        ncp = get_array_module(x)
+        y = ncp.zeros(x.shape, self.dtype)
+        # y[..., 2:-2] = (
+        #     x[..., :-4] / 12.0
+        #     - 2 * x[..., 1:-3] / 3.0
+        #     + 2 * x[..., 3:-1] / 3.0
+        #     - x[..., 4:] / 12.0
+        # )
+        y = inplace_set(
+            (
+                x[..., :-4] / 12.0
+                - 2 * x[..., 1:-3] / 3.0
+                + 2 * x[..., 3:-1] / 3.0
+                - x[..., 4:] / 12.0
+            ),
+            y,
+            self._slice[2][-2],
+        )
+        if self.edge:
+            # y[..., 0] = x[..., 1] - x[..., 0]
+            y = inplace_set(x[..., 1] - x[..., 0], y, self._sample[0])
+            # y[..., 1] = 0.5 * (x[..., 2] - x[..., 0])
+            y = inplace_set(0.5 * (x[..., 2] - x[..., 0]), y, self._sample[1])
+            # y[..., -2] = 0.5 * (x[..., -1] - x[..., -3])
+            y = inplace_set(0.5 * (x[..., -1] - x[..., -3]), y, self._sample[-2])
+            # y[..., -1] = x[..., -1] - x[..., -2]
+            y = inplace_set(x[..., -1] - x[..., -2], y, self._sample[-1])
+        y /= self.sampling
+        return y
+
+    @reshaped(swapaxis=True)
+    def _rmatvec_centered5(self, x: NDArray) -> NDArray:
+        ncp = get_array_module(x)
+        y = ncp.zeros(x.shape, self.dtype)
+        # y[..., :-4] += x[..., 2:-2] / 12.0
+        y = inplace_add(x[..., 2:-2] / 12.0, y, self._slice[None][-4])
+        # y[..., 1:-3] -= 2.0 * x[..., 2:-2] / 3.0
+        y = inplace_add(-2.0 * x[..., 2:-2] / 3.0, y, self._slice[1][-3])
+        # y[..., 3:-1] += 2.0 * x[..., 2:-2] / 3.0
+        y = inplace_add(2.0 * x[..., 2:-2] / 3.0, y, self._slice[3][-1])
+        # y[..., 4:] -= x[..., 2:-2] / 12.0
+        y = inplace_add(-x[..., 2:-2] / 12.0, y, self._slice[4][None])
+        if self.edge:
+            # y[..., 0] -= x[..., 0] + 0.5 * x[..., 1]
+            y = inplace_add(-(x[..., 0] + 0.5 * x[..., 1]), y, self._sample[0])
+            # y[..., 1] += x[..., 0]
+            y = inplace_add(x[..., 0], y, self._sample[1])
+            # y[..., 2] += 0.5 * x[..., 1]
+            y = inplace_add(0.5 * x[..., 1], y, self._sample[2])
+            # y[..., -3] -= 0.5 * x[..., -2]
+            y = inplace_add(-0.5 * x[..., -2], y, self._sample[-3])
+            # y[..., -2] -= x[..., -1]
+            y = inplace_add(-x[..., -1], y, self._sample[-2])
+            # y[..., -1] += 0.5 * x[..., -2] + x[..., -1]
+            y = inplace_add(0.5 * x[..., -2] + x[..., -1], y, self._sample[-1])
+        y /= self.sampling
+        return y
+
+    @reshaped(swapaxis=True)
+    def _matvec_backward(self, x: NDArray) -> NDArray:
+        ncp = get_array_module(x)
+        y = ncp.zeros(x.shape, self.dtype)
+        # y[..., 1:] = (x[..., 1:] - x[..., :-1]) / self.sampling
+        y = inplace_set(
+            (x[..., 1:] - x[..., :-1]) / self.sampling, y, self._slice[1][None]
+        )
+        return y
+
+    @reshaped(swapaxis=True)
+    def _rmatvec_backward(self, x: NDArray) -> NDArray:
+        ncp = get_array_module(x)
+        y = ncp.zeros(x.shape, self.dtype)
+        # y[..., :-1] -= x[..., 1:]
+        y = inplace_add(-x[..., 1:], y, self._slice[None][-1])
+        # y[..., 1:] += x[..., 1:]
+        y = inplace_add(x[..., 1:], y, self._slice[1][None])
+        y /= self.sampling
+        return y

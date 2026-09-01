@@ -1,65 +1,101 @@
-import logging
+__all__ = [
+    "PrestackLinearModelling",
+    "PrestackWaveletModelling",
+    "PrestackInversion",
+]
+
+from collections.abc import Callable
+from typing import Literal
+
 import numpy as np
 from scipy.sparse.linalg import lsqr
 
-from pylops.signalprocessing import Convolve1D
-from pylops.utils.signalprocessing import convmtx
-from pylops.utils import dottest as Dottest
-from pylops import MatrixMult, FirstDerivative, Diagonal, Identity, VStack,\
-    SecondDerivative, Laplacian
+from pylops import (
+    Diagonal,
+    FirstDerivative,
+    Identity,
+    Laplacian,
+    LinearOperator,
+    MatrixMult,
+    SecondDerivative,
+    VStack,
+)
 from pylops.avo.avo import AVOLinearModelling, akirichards, fatti, ps
-from pylops.optimization.solver import cgls
-from pylops.optimization.leastsquares import RegularizedInversion
-from pylops.optimization.sparsity import SplitBregman
-from pylops.utils.backend import get_array_module, get_module_name,\
-    get_block_diag, get_lstsq
+from pylops.optimization.basic import cgls
+from pylops.optimization.leastsquares import regularized_inversion
+from pylops.optimization.sparsity import splitbregman
+from pylops.signalprocessing import Convolve1D
+from pylops.utils import dottest as Dottest
+from pylops.utils.backend import (
+    get_array_module,
+    get_block_diag,
+    get_lstsq,
+    get_module_name,
+    inplace_set,
+)
+from pylops.utils.signalprocessing import convmtx
+from pylops.utils.typing import NDArray, ShapeLike, Tavolinearization
 
-logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.WARNING)
-
-_linearizations = {'akirich': 3, 'fatti': 3, 'ps': 3}
+_linearizations = {"akirich": 3, "fatti": 3, "ps": 3}
 
 
-def PrestackLinearModelling(wav, theta, vsvp=0.5, nt0=1, spatdims=None,
-                            linearization='akirich', explicit=False,
-                            kind='centered'):
+def PrestackLinearModelling(
+    wav: NDArray,
+    theta: NDArray,
+    vsvp: float | NDArray = 0.5,
+    nt0: int = 1,
+    spatdims: int | ShapeLike | None = None,
+    linearization: Tavolinearization = "akirich",
+    explicit: bool = False,
+    kind: Literal["centered", "forward"] = "centered",
+    name: str | None = None,
+) -> LinearOperator:
     r"""Pre-stack linearized seismic modelling operator.
 
     Create operator to be applied to elastic property profiles
     for generation of band-limited seismic angle gathers from a
     linearized version of the Zoeppritz equation. The input model must
-    be arranged in a vector of size :math:`n_m \times n_{t0} (\times n_x \times n_y)`
-    for ``explicit=True`` and :math:`n_{t0} \times n_m  (\times n_x \times n_y)`
+    be arranged in a vector of size :math:`n_m \times n_{t_0}\,(\times n_x \times n_y)`
+    for ``explicit=True`` and :math:`n_{t_0} \times n_m \,(\times n_x \times n_y)`
     for ``explicit=False``. Similarly the output data is arranged in a
-    vector of size :math:`n_{theta} \times n_{t0}  (\times n_x \times n_y)`
-    for ``explicit=True`` and :math:`n_{t0} \times n_{theta} (\times n_x \times n_y)`
+    vector of size :math:`n_{\theta} \times n_{t_0} \,(\times n_x \times n_y)`
+    for ``explicit=True`` and :math:`n_{t_0} \times n_{\theta} \,(\times n_x \times n_y)`
     for ``explicit=False``.
 
     Parameters
     ----------
-    wav : :obj:`np.ndarray`
+    wav : :obj:`numpy.ndarray`
         Wavelet in time domain (must had odd number of
         elements and centered to zero). Note that the ``dtype`` of this
         variable will define that of the operator
-    theta : :obj:`np.ndarray`
+    theta : :obj:`numpy.ndarray`
         Incident angles in degrees. Must have same ``dtype`` of ``wav`` (or
         it will be automatically casted to it)
-    vsvp : :obj:`float` or :obj:`np.ndarray`
-        VS/VP ratio (constant or time/depth variant)
+    vsvp : :obj:`float` or :obj:`numpy.ndarray`
+        :math:`V_S/V_P` ratio (constant or time/depth variant)
     nt0 : :obj:`int`, optional
         number of samples (if ``vsvp`` is a scalar)
     spatdims : :obj:`int` or :obj:`tuple`, optional
         Number of samples along spatial axis (or axes)
         (``None`` if only one dimension is available)
-    linearization : :obj:`str` or :obj:`func`, optional
-        choice of linearization, ``akirich``: Aki-Richards, ``fatti``: Fatti,
-        ``ps``: PS or any function on the form of
-        ``pylops.avo.avo.akirichards``
+    linearization : `{"akirich", "fatti", "PS"}` or :obj:`callable`, optional
+        * "akirich": Aki-Richards. See :py:func:`pylops.avo.avo.akirichards`.
+
+        * "fatti": Fatti. See :py:func:`pylops.avo.avo.fatti`.
+
+        * "PS": PS. See :py:func:`pylops.avo.avo.ps`.
+
+        * Function with the same signature as :py:func:`pylops.avo.avo.akirichards`
     explicit : :obj:`bool`, optional
         Create a chained linear operator (``False``, preferred for large data)
         or a ``MatrixMult`` linear operator with dense matrix
         (``True``, preferred for small data)
     kind : :obj:`str`, optional
-        Derivative kind (``forward`` or ``centered``).
+        Derivative kind (``centered`` or ``forward``).
+    name : :obj:`str`, optional
+        .. versionadded:: 2.0.0
+
+        Name of operator (to be used by :func:`pylops.utils.describe.describe`)
 
     Returns
     -------
@@ -96,20 +132,19 @@ def PrestackLinearModelling(wav, theta, vsvp=0.5, nt0=1, spatdims=None,
     ncp = get_array_module(wav)
 
     # check kind is correctly selected
-    if kind not in ['forward', 'centered']:
-        raise NotImplementedError('%s not an available derivative kind...'
-                                  % kind)
+    if kind not in ["forward", "centered"]:
+        raise NotImplementedError("%s not an available derivative kind..." % kind)
     # define dtype to be used
-    dtype = theta.dtype # ensure theta.dtype rules that of operator
+    dtype = theta.dtype  # ensure theta.dtype rules that of operator
     theta = theta.astype(dtype)
 
     # create vsvp profile
-    vsvp = vsvp if isinstance(vsvp, ncp.ndarray) else \
-        vsvp * ncp.ones(nt0, dtype=dtype)
+    vsvp = vsvp if isinstance(vsvp, ncp.ndarray) else vsvp * ncp.ones(nt0, dtype=dtype)
     nt0 = len(vsvp)
     ntheta = len(theta)
 
     # organize dimensions
+    dims: ShapeLike | None
     if spatdims is None:
         dims = (nt0, ntheta)
         spatdims = None
@@ -121,64 +156,82 @@ def PrestackLinearModelling(wav, theta, vsvp=0.5, nt0=1, spatdims=None,
 
     if explicit:
         # Create AVO operator
-        if linearization == 'akirich':
+        if linearization == "akirich":
             G = akirichards(theta, vsvp, n=nt0)
-        elif linearization == 'fatti':
+        elif linearization == "fatti":
             G = fatti(theta, vsvp, n=nt0)
-        elif linearization == 'ps':
+        elif linearization == "ps":
             G = ps(theta, vsvp, n=nt0)
         elif callable(linearization):
             G = linearization(theta, vsvp, n=nt0)
         else:
-            logging.error('%s not an available linearization...',
-                          linearization)
-            raise NotImplementedError('%s not an available linearization...'
-                                      % linearization)
+            raise NotImplementedError(
+                "%s not an available linearization..." % linearization
+            )
         nG = len(G)
-        G = [ncp.hstack([ncp.diag(G_[itheta] * ncp.ones(nt0, dtype=dtype))
-                         for G_ in G]) for itheta in range(ntheta)]
+        G = [
+            ncp.hstack([ncp.diag(G_[itheta] * ncp.ones(nt0, dtype=dtype)) for G_ in G])
+            for itheta in range(ntheta)
+        ]
         G = ncp.vstack(G).reshape(ntheta * nt0, nG * nt0)
 
         # Create derivative operator
-        if kind == 'centered':
-            D = ncp.diag(0.5 * ncp.ones(nt0 - 1, dtype=dtype), k=1) - \
-                ncp.diag(0.5 * ncp.ones(nt0 - 1, dtype=dtype), k=-1)
-            D[0] = D[-1] = 0
+        if kind == "centered":
+            D = ncp.diag(0.5 * ncp.ones(nt0 - 1, dtype=dtype), k=1) - ncp.diag(
+                0.5 * ncp.ones(nt0 - 1, dtype=dtype), k=-1
+            )
+            D = inplace_set(ncp.array(0.0), D, 0)
+            D = inplace_set(ncp.array(0.0), D, -1)
         else:
-            D = ncp.diag(ncp.ones(nt0 - 1, dtype=dtype), k=1) - \
-                ncp.diag(ncp.ones(nt0, dtype=dtype), k=0)
-            D[-1] = 0
+            D = ncp.diag(ncp.ones(nt0 - 1, dtype=dtype), k=1) - ncp.diag(
+                ncp.ones(nt0, dtype=dtype), k=0
+            )
+            D = inplace_set(ncp.array(0.0), D, -1)
         D = get_block_diag(theta)(*([D] * nG))
 
         # Create wavelet operator
-        C = convmtx(wav, nt0)[:, len(wav) // 2:-len(wav) // 2 + 1]
+        C = ncp.asarray(convmtx(wav, nt0, len(wav) // 2)[:nt0])
         C = [C] * ntheta
         C = get_block_diag(theta)(*C)
 
         # Combine operators
         M = ncp.dot(C, ncp.dot(G, D))
-        Preop = MatrixMult(M, dims=spatdims, dtype=dtype)
+        Preop = MatrixMult(M, otherdims=spatdims, dtype=dtype)
 
     else:
         # Create wavelet operator
-        Cop = Convolve1D(np.prod(np.array(dims)), h=wav,
-                         offset=len(wav)//2, dir=0, dims=dims, dtype=dtype)
+        Cop = Convolve1D(
+            dims,
+            h=wav,
+            offset=len(wav) // 2,
+            axis=0,
+            dtype=dtype,
+        )
 
         # create AVO operator
-        AVOop = AVOLinearModelling(theta, vsvp, spatdims=spatdims,
-                                   linearization=linearization, dtype=dtype)
+        AVOop = AVOLinearModelling(
+            theta, vsvp, spatdims=spatdims, linearization=linearization, dtype=dtype
+        )
 
         # Create derivative operator
         dimsm = list(dims)
         dimsm[1] = AVOop.npars
-        Dop = FirstDerivative(np.prod(np.array(dimsm)), dims=dimsm,
-                              dir=0, sampling=1., kind=kind, dtype=dtype)
+        Dop = FirstDerivative(dimsm, axis=0, sampling=1.0, kind=kind, dtype=dtype)
         Preop = Cop * AVOop * Dop
+
+    Preop.name = name
     return Preop
 
 
-def PrestackWaveletModelling(m, theta, nwav, wavc=None,
-                             vsvp=0.5, linearization='akirich'):
+def PrestackWaveletModelling(
+    m: NDArray,
+    theta: NDArray,
+    nwav: int,
+    wavc: int | None = None,
+    vsvp: float | NDArray = 0.5,
+    linearization: Tavolinearization | Callable = "akirich",
+    name: str | None = None,
+) -> LinearOperator:
     r"""Pre-stack linearized seismic modelling operator for wavelet.
 
     Create operator to be applied to a wavelet for generation of
@@ -187,23 +240,31 @@ def PrestackWaveletModelling(m, theta, nwav, wavc=None,
 
     Parameters
     ----------
-    m : :obj:`np.ndarray`
-        elastic parameter profles of size :math:`[n_{t0} \times N]`
-        where :math:`N=3/2`. Note that the ``dtype`` of this
+    m : :obj:`numpy.ndarray`
+        elastic parameter profles of size :math:`[n_{t_0} \times N]`
+        where :math:`N=3,\,2`. Note that the ``dtype`` of this
         variable will define that of the operator
     theta : :obj:`int`
         Incident angles in degrees. Must have same ``dtype`` of ``m`` (or
-        it will be automatically casted to it)
-    nwav : :obj:`np.ndarray`
+        it will be automatically cast to it)
+    nwav : :obj:`numpy.ndarray`
         Number of samples of wavelet to be applied/estimated
     wavc : :obj:`int`, optional
         Index of the center of the wavelet
-    vsvp : :obj:`np.ndarray` or :obj:`float`, optional
-        VS/VP ratio
-    linearization : :obj:`str`, optional
-        choice of linearization, ``akirich``: Aki-Richards,
-        ``fatti``: Fatti, ``ps``: PS, or any function on the form of
-        ``pylops.avo.avo.akirichards``
+    vsvp : :obj:`numpy.ndarray` or :obj:`float`, optional
+        :math:`V_S/V_P` ratio
+    linearization : `{"akirich", "fatti", "PS"}` or :obj:`callable`, optional
+        * "akirich": Aki-Richards. See :py:func:`pylops.avo.avo.akirichards`.
+
+        * "fatti": Fatti. See :py:func:`pylops.avo.avo.fatti`.
+
+        * "PS": PS. See :py:func:`pylops.avo.avo.ps`.
+
+        * Function with the same signature as :py:func:`pylops.avo.avo.akirichards`
+    name : :obj:`str`, optional
+        .. versionadded:: 2.0.0
+
+        Name of operator (to be used by :func:`pylops.utils.describe.describe`)
 
     Returns
     -------
@@ -221,7 +282,7 @@ def PrestackWaveletModelling(m, theta, nwav, wavc=None,
     of constructing seismic reflectivities using three (or two)
     profiles of elastic parameters in time (or depth)
     domain arranged in an input vector :math:`\mathbf{m}`
-    of size :math:`nt0 \times N`:
+    of size :math:`n_{t_0} \times N`:
 
     .. math::
         d(t, \theta) =  \sum_{i=1}^N G_i(t, \theta) m_i(t) * w(t)
@@ -243,49 +304,71 @@ def PrestackWaveletModelling(m, theta, nwav, wavc=None,
     theta = theta.astype(dtype)
 
     # Create vsvp profile
-    vsvp = vsvp if isinstance(vsvp, ncp.ndarray) else \
-        vsvp * ncp.ones(m.shape[0], dtype=dtype)
+    vsvp = (
+        vsvp
+        if isinstance(vsvp, ncp.ndarray)
+        else vsvp * ncp.ones(m.shape[0], dtype=dtype)
+    )
     wavc = nwav // 2 if wavc is None else wavc
     nt0 = len(vsvp)
     ntheta = len(theta)
 
     # Create AVO operator
-    if linearization == 'akirich':
+    if linearization == "akirich":
         G = akirichards(theta, vsvp, n=nt0)
-    elif linearization == 'fatti':
+    elif linearization == "fatti":
         G = fatti(theta, vsvp, n=nt0)
-    elif linearization == 'ps':
+    elif linearization == "ps":
         G = ps(theta, vsvp, n=nt0)
     elif callable(linearization):
         G = linearization(theta, vsvp, n=nt0)
     else:
-        logging.error('%s not an available linearization...',
-                      linearization)
-        raise NotImplementedError('%s not an available linearization...'
-                                  % linearization)
+        msg = f"{linearization} is not an available linearization..."
+        raise NotImplementedError(msg)
     nG = len(G)
-    G = [ncp.hstack([ncp.diag(G_[itheta] * ncp.ones(nt0, dtype=dtype))
-                     for G_ in G]) for itheta in range(ntheta)]
+    G = [
+        ncp.hstack([ncp.diag(G_[itheta] * ncp.ones(nt0, dtype=dtype)) for G_ in G])
+        for itheta in range(ntheta)
+    ]
     G = ncp.vstack(G).reshape(ntheta * nt0, nG * nt0)
 
     # Create derivative operator
-    D = ncp.diag(0.5 * np.ones(nt0 - 1, dtype=dtype), k=1) - \
-        ncp.diag(0.5 * np.ones(nt0 - 1, dtype=dtype), k=-1)
-    D[0] = D[-1] = 0
+    D = ncp.diag(0.5 * np.ones(nt0 - 1, dtype=dtype), k=1) - ncp.diag(
+        0.5 * np.ones(nt0 - 1, dtype=dtype), k=-1
+    )
+    D = inplace_set(ncp.array(0.0), D, 0)
+    D = inplace_set(ncp.array(0.0), D, -1)
     D = get_block_diag(theta)(*([D] * nG))
 
     # Create infinite-reflectivity data
-    M = ncp.dot(G, ncp.dot(D, m.T.flatten())).reshape(ntheta, nt0)
-    Mconv = VStack([MatrixMult(convmtx(M[itheta], nwav)[wavc:-nwav+wavc+1],
-                               dtype=dtype) for itheta in range(ntheta)])
+    M = ncp.dot(G, ncp.dot(D, m.T.ravel())).reshape(ntheta, nt0)
+    Mconv = VStack(
+        [
+            MatrixMult(convmtx(M[itheta], nwav, wavc)[:nt0], dtype=dtype)
+            for itheta in range(ntheta)
+        ]
+    )
+    Mconv.name = name
     return Mconv
 
 
-def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
-                      explicit=False, simultaneous=False,
-                      epsI=None, epsR=None, dottest=False,
-                      returnres=False, epsRL1=None, kind='centered',
-                      vsvp=0.5, **kwargs_solver):
+def PrestackInversion(
+    data: NDArray,
+    theta: NDArray,
+    wav: NDArray,
+    m0: NDArray | None = None,
+    linearization: Tavolinearization | list[Tavolinearization] = "akirich",
+    explicit: bool = False,
+    simultaneous: bool = False,
+    epsI: float | None = None,
+    epsR: float | None = None,
+    dottest: bool = False,
+    returnres: bool = False,
+    epsRL1: float | None = None,
+    kind: Literal["centered", "forward"] = "centered",
+    vsvp: float | NDArray = 0.5,
+    **kwargs_solver,
+) -> NDArray | tuple[NDArray, NDArray]:
     r"""Pre-stack linearized seismic inversion.
 
     Invert pre-stack seismic operator to retrieve a set of elastic property
@@ -296,21 +379,26 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
 
     Parameters
     ----------
-    data : :obj:`np.ndarray`
+    data : :obj:`numpy.ndarray`
         Band-limited seismic post-stack data of size
-        :math:`[(n_{lins} \times) n_{t0} \times n_{\theta} (\times n_x \times n_y)]`
-    theta : :obj:`np.ndarray`
+        :math:`[(n_\text{lins} \times) \, n_{t_0} \times n_{\theta} \, (\times n_x \times n_y)]`
+    theta : :obj:`numpy.ndarray`
         Incident angles in degrees
-    wav : :obj:`np.ndarray`
+    wav : :obj:`numpy.ndarray`
         Wavelet in time domain (must had odd number of elements
         and centered to zero)
-    m0 : :obj:`np.ndarray`, optional
-        Background model of size :math:`[n_{t0} \times n_{m}
-        (\times n_x \times n_y)]`
-    linearization : :obj:`str` or :obj:`list`, optional
-        choice of linearization, ``akirich``: Aki-Richards, ``fatti``: Fatti
-        ``PS``: PS or a combination of them (required only when ``m0``
-        is ``None``).
+    m0 : :obj:`numpy.ndarray`, optional
+        Background model of size :math:`[n_{t_0} \times n_{m}
+        \,(\times n_x \times n_y)]`
+    linearization : `{"akirich", "fatti", "PS"}` or :obj:`list`, optional
+        * "akirich": Aki-Richards. See :py:func:`pylops.avo.avo.akirichards`.
+
+        * "fatti": Fatti. See :py:func:`pylops.avo.avo.fatti`.
+
+        * "PS": PS. See :py:func:`pylops.avo.avo.ps`.
+
+        * List which is a combination of previous options (required only when ``m0 is None``).
+
     explicit : :obj:`bool`, optional
         Create a chained linear operator (``False``, preferred for large data)
         or a ``MatrixMult`` linear operator with dense matrix
@@ -333,9 +421,9 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
     epsRL1 : :obj:`float`, optional
         Damping factor for additional blockiness regularization term
     kind : :obj:`str`, optional
-        Derivative kind (``forward`` or ``centered``).
-    vsvp : :obj:`float` or :obj:`np.ndarray`
-        VS/VP ratio (constant or time/depth variant)
+        Derivative kind (``centered`` or ``forward``).
+    vsvp : :obj:`float` or :obj:`numpy.ndarray`
+        :math:`V_S/V_P` ratio (constant or time/depth variant)
     **kwargs_solver
         Arbitrary keyword arguments for :py:func:`scipy.linalg.lstsq`
         solver (if ``explicit=True`` and  ``epsR=None``)
@@ -344,12 +432,12 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
 
     Returns
     -------
-    minv : :obj:`np.ndarray`
-        Inverted model of size :math:`[n_{t0} \times n_{m}
-        (\times n_x \times n_y)]`
-    datar : :obj:`np.ndarray`
+    minv : :obj:`numpy.ndarray`
+        Inverted model of size :math:`[n_{t_0} \times n_{m}
+        \,(\times n_x \times n_y)]`
+    datar : :obj:`numpy.ndarray`
         Residual data (i.e., data - background data) of
-        size :math:`[n_{t0} \times n_{\theta} (\times n_x \times n_y)]`
+        size :math:`[n_{t_0} \times n_{\theta} \,(\times n_x \times n_y)]`
 
     Notes
     -----
@@ -364,8 +452,8 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
 
     # find out dimensions
     if m0 is None and linearization is None:
-        raise NotImplementedError('either m0 or linearization '
-                                  'must be provided')
+        msg = "Either m0 or linearization must be provided"
+        raise NotImplementedError(msg)
     elif m0 is None:
         if isinstance(linearization, str):
             nm = _linearizations[linearization]
@@ -392,7 +480,7 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
     elif data_ndim == 3:
         dims = 2
         nt0, ntheta, nx = data_shape
-        nspat = (nx, )
+        nspat = (nx,)
         nspatprod = nx
     else:
         dims = 3
@@ -403,35 +491,61 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
 
     # check if background model and data have same shape
     if m0 is not None:
-        if nt0 != m0.shape[0] or\
-        (dims >= 2 and nx != m0.shape[2]) or\
-        (dims == 3 and ny != m0.shape[3]):
-            raise ValueError('data and m0 must have same time and space axes')
+        if (
+            nt0 != m0.shape[0]
+            or (dims >= 2 and nx != m0.shape[2])
+            or (dims == 3 and ny != m0.shape[3])
+        ):
+            msg = "data and m0 must have the same time and space axes"
+            raise ValueError(msg)
 
     # create operator
     if isinstance(linearization, str):
         # single operator
-        PPop = PrestackLinearModelling(wav, theta, vsvp=vsvp, nt0=nt0, spatdims=nspat,
-                                       linearization=linearization,
-                                       explicit=explicit, kind=kind)
+        PPop = PrestackLinearModelling(
+            wav,
+            theta,
+            vsvp=vsvp,
+            nt0=nt0,
+            spatdims=nspat,
+            linearization=linearization,
+            explicit=explicit,
+            kind=kind,
+        )
     else:
         # multiple operators
         if not isinstance(wav, (list, tuple)):
-            wav = [wav,] * n_lins
-        PPop = [PrestackLinearModelling(w, theta, vsvp=vsvp, nt0=nt0,
-                                        spatdims=nspat, linearization=lin,
-                                        explicit=explicit)
-                for w, lin in zip(wav, linearization)]
+            wav = [
+                wav,
+            ] * n_lins
+        PPop = [
+            PrestackLinearModelling(
+                w,
+                theta,
+                vsvp=vsvp,
+                nt0=nt0,
+                spatdims=nspat,
+                linearization=lin,
+                explicit=explicit,
+            )
+            for w, lin in zip(wav, linearization, strict=True)
+        ]
         if explicit:
-            PPop = MatrixMult(np.vstack([Op.A for Op in PPop]), dims=nspat,
-                              dtype=PPop[0].A.dtype)
+            PPop = MatrixMult(
+                np.vstack([Op.A for Op in PPop]), otherdims=nspat, dtype=PPop[0].A.dtype
+            )
         else:
             PPop = VStack(PPop)
 
     if dottest:
-        Dottest(PPop, n_lins * nt0 * ntheta * nspatprod,
-                nt0 * nm * nspatprod, raiseerror=True, verb=True,
-                backend=get_module_name(ncp))
+        Dottest(
+            PPop,
+            n_lins * nt0 * ntheta * nspatprod,
+            nt0 * nm * nspatprod,
+            raiseerror=True,
+            verb=True,
+            backend=get_module_name(ncp),
+        )
 
     # swap axes for explicit operator
     if explicit:
@@ -442,111 +556,113 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
     # invert model
     if epsR is None:
         # create and remove background data from original data
-        datar = data.flatten() if m0 is None else \
-            data.flatten() - PPop * m0.flatten()
+        datar = data.ravel() if m0 is None else data.ravel() - PPop * m0.ravel()
         # inversion without spatial regularization
         if explicit:
             if epsI is None and not simultaneous:
                 # solve unregularized equations indipendently trace-by-trace
-                minv = \
-                    get_lstsq(data)(PPop.A,
-                                    datar.reshape(n_lins*nt0*ntheta, nspatprod).squeeze(),
-                                    **kwargs_solver)[0]
+                minv = get_lstsq(data)(
+                    PPop.A,
+                    datar.reshape(n_lins * nt0 * ntheta, nspatprod).squeeze(),
+                    **kwargs_solver,
+                )[0]
             elif epsI is None and simultaneous:
                 # solve unregularized equations simultaneously
                 if ncp == np:
                     minv = lsqr(PPop, datar, **kwargs_solver)[0]
                 else:
-                    minv = cgls(PPop, datar,
-                                x0=ncp.zeros(int(PPop.shape[1]), PPop.dtype),
-                                **kwargs_solver)[0]
+                    minv = cgls(
+                        PPop,
+                        datar,
+                        x0=ncp.zeros(int(PPop.shape[1]), PPop.dtype),
+                        **kwargs_solver,
+                    )[0]
             elif epsI is not None:
                 # create regularized normal equations
-                PP = ncp.dot(PPop.A.T, PPop.A) + \
-                     epsI * ncp.eye(nt0*nm, dtype=PPop.A.dtype)
-                datarn = np.dot(PPop.A.T, datar.reshape(nt0*ntheta, nspatprod))
+                PP = ncp.dot(PPop.A.T, PPop.A) + epsI * ncp.eye(
+                    nt0 * nm, dtype=PPop.A.dtype
+                )
+                datarn = np.dot(PPop.A.T, datar.reshape(nt0 * ntheta, nspatprod))
                 if not simultaneous:
                     # solve regularized normal eqs. trace-by-trace
                     minv = get_lstsq(data)(PP, datarn, **kwargs_solver)[0]
                 else:
                     # solve regularized normal equations simultaneously
-                    PPop_reg = MatrixMult(PP, dims=nspatprod)
+                    PPop_reg = MatrixMult(PP, otherdims=nspatprod)
                     if ncp == np:
-                        minv = lsqr(PPop_reg, datarn.ravel(),
-                                    **kwargs_solver)[0]
+                        minv = lsqr(PPop_reg, datarn.ravel(), **kwargs_solver)[0]
                     else:
-                        minv = cgls(PPop_reg,
-                                    datarn.ravel(),
-                                    x0=ncp.zeros(int(PPop_reg.shape[1]),
-                                                 PPop_reg.dtype),
-                                    **kwargs_solver)[0]
-            #else:
+                        minv = cgls(
+                            PPop_reg,
+                            datarn.ravel(),
+                            x0=ncp.zeros(int(PPop_reg.shape[1]), PPop_reg.dtype),
+                            **kwargs_solver,
+                        )[0]
+            # else:
             #    # create regularized normal eqs. and solve them simultaneously
             #    PP = np.dot(PPop.A.T, PPop.A) + epsI * np.eye(nt0*nm)
             #    datarn = PPop.A.T * datar.reshape(nt0*ntheta, nspatprod)
-            #    PPop_reg = MatrixMult(PP, dims=ntheta*nspatprod)
-            #    minv = lstsq(PPop_reg, datarn.flatten(), **kwargs_solver)[0]
+            #    PPop_reg = MatrixMult(PP, otherdims=ntheta*nspatprod)
+            #    minv = lstsq(PPop_reg, datarn.ravel(), **kwargs_solver)[0]
         else:
             # solve unregularized normal equations simultaneously with lop
             if ncp == np:
                 minv = lsqr(PPop, datar, **kwargs_solver)[0]
             else:
-                minv = cgls(PPop, datar,
-                            x0=ncp.zeros(int(PPop.shape[1]), PPop.dtype),
-                            **kwargs_solver)[0]
+                minv = cgls(
+                    PPop,
+                    datar,
+                    x0=ncp.zeros(int(PPop.shape[1]), PPop.dtype),
+                    **kwargs_solver,
+                )[0]
     else:
         # Create Thicknov regularization
         if epsI is not None:
             if isinstance(epsI, (list, tuple)):
                 if len(epsI) != nm:
-                    raise ValueError('epsI must be a scalar or a list of'
-                                     'size nm')
-                RegI = Diagonal(np.array(epsI),
-                                dims=(nt0, nm, nspatprod), dir=1)
+                    msg = f"epsI must be a scalar or a list of size nm, got {epsI}"
+                    raise ValueError(msg)
+                RegI = Diagonal(np.array(epsI), dims=(nt0, nm, nspatprod), axis=1)
             else:
                 RegI = epsI * Identity(nt0 * nm * nspatprod)
 
         if epsRL1 is None:
             # L2 inversion with spatial regularization
             if dims == 1:
-                Regop = SecondDerivative(nt0 * nm, dtype=PPop.dtype,
-                                         dims=(nt0, nm))
+                Regop = SecondDerivative((nt0, nm), axis=0, dtype=PPop.dtype)
             elif dims == 2:
-                Regop = Laplacian((nt0, nm, nx), dirs=(0, 2), dtype=PPop.dtype)
+                Regop = Laplacian((nt0, nm, nx), axes=(0, 2), dtype=PPop.dtype)
             else:
-                Regop = Laplacian((nt0, nm, nx, ny), dirs=(2, 3),
-                                  dtype=PPop.dtype)
+                Regop = Laplacian((nt0, nm, nx, ny), axes=(2, 3), dtype=PPop.dtype)
             if epsI is None:
-                Regop = (Regop, )
-                epsR = (epsR, )
+                Regop = (Regop,)
+                epsR = (epsR,)
             else:
                 Regop = (Regop, RegI)
                 epsR = (epsR, 1)
-            minv = \
-                RegularizedInversion(PPop, Regop, data.ravel(),
-                                     x0=m0.flatten() if m0 is not None
-                                     else None, epsRs=epsR,
-                                     returninfo=False, **kwargs_solver)
+            minv = regularized_inversion(
+                PPop,
+                data.ravel(),
+                Regop,
+                x0=m0.ravel() if m0 is not None else None,
+                epsRs=epsR,
+                **kwargs_solver,
+            )[0]
         else:
             # Blockiness-promoting inversion with spatial regularization
             if dims == 1:
                 RegL1op = FirstDerivative(nt0 * nm, dtype=PPop.dtype)
                 RegL2op = None
             elif dims == 2:
-                RegL1op = FirstDerivative(nt0 * nx * nm, dims=(nt0, nm, nx),
-                                          dir=0, dtype=PPop.dtype)
-                RegL2op = SecondDerivative(nt0 * nx * nm, dims=(nt0, nm, nx),
-                                           dir=2, dtype=PPop.dtype)
+                RegL1op = FirstDerivative((nt0, nm, nx), axis=0, dtype=PPop.dtype)
+                RegL2op = SecondDerivative((nt0, nm, nx), axis=2, dtype=PPop.dtype)
             else:
-                RegL1op = FirstDerivative(nt0 * nx * ny * nm,
-                                          dims=(nt0, nm, nx, ny),
-                                          dir=0, dtype=PPop.dtype)
-                RegL2op = Laplacian((nt0, nm, nx, ny), dirs=(2, 3),
-                                    dtype=PPop.dtype)
+                RegL1op = FirstDerivative((nt0, nm, nx, ny), axis=0, dtype=PPop.dtype)
+                RegL2op = Laplacian((nt0, nm, nx, ny), axes=(2, 3), dtype=PPop.dtype)
             if dims == 1:
                 if epsI is not None:
-                    RegL2op = (RegI, )
-                    epsR = (1, )
+                    RegL2op = (RegI,)
+                    epsR = (1,)
             else:
                 if epsI is None:
                     RegL2op = (RegL2op,)
@@ -554,29 +670,35 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
                 else:
                     RegL2op = (RegL2op, RegI)
                     epsR = (epsR, 1)
-            epsRL1 = (epsRL1, )
-            if 'mu' in kwargs_solver.keys():
-                mu = kwargs_solver['mu']
-                kwargs_solver.pop('mu')
+            epsRL1 = (epsRL1,)
+            if "mu" in kwargs_solver.keys():
+                mu = kwargs_solver["mu"]
+                kwargs_solver.pop("mu")
             else:
-                mu = 1.
-            if 'niter_outer' in kwargs_solver.keys():
-                niter_outer = kwargs_solver['niter_outer']
-                kwargs_solver.pop('niter_outer')
+                mu = 1.0
+            if "niter_outer" in kwargs_solver.keys():
+                niter_outer = kwargs_solver["niter_outer"]
+                kwargs_solver.pop("niter_outer")
             else:
                 niter_outer = 3
-            if 'niter_inner' in kwargs_solver.keys():
-                niter_inner = kwargs_solver['niter_inner']
-                kwargs_solver.pop('niter_inner')
+            if "niter_inner" in kwargs_solver.keys():
+                niter_inner = kwargs_solver["niter_inner"]
+                kwargs_solver.pop("niter_inner")
             else:
                 niter_inner = 5
-            minv = SplitBregman(PPop, (RegL1op, ), data.ravel(),
-                                RegsL2=RegL2op, epsRL1s=epsRL1,
-                                epsRL2s=epsR, mu=mu,
-                                niter_outer=niter_outer,
-                                niter_inner=niter_inner,
-                                x0=None if m0 is None else m0.flatten(),
-                                **kwargs_solver)[0]
+            minv = splitbregman(
+                PPop,
+                data.ravel(),
+                (RegL1op,),
+                RegsL2=RegL2op,
+                epsRL1s=epsRL1,
+                epsRL2s=epsR,
+                mu=mu,
+                niter_outer=niter_outer,
+                niter_inner=niter_inner,
+                x0=None if m0 is None else m0.ravel(),
+                **kwargs_solver,
+            )[0]
 
     # compute residual
     if returnres:
@@ -595,7 +717,11 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
         if explicit:
             minv = minv.reshape(nm, nt0).swapaxes(0, 1)
             if returnres:
-                datar = datar.reshape(n_lins, ntheta, nt0).squeeze().swapaxes(0 + multi, 1 + multi)
+                datar = (
+                    datar.reshape(n_lins, ntheta, nt0)
+                    .squeeze()
+                    .swapaxes(0 + multi, 1 + multi)
+                )
         else:
             minv = minv.reshape(nt0, nm)
             if returnres:
@@ -604,7 +730,11 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
         if explicit:
             minv = minv.reshape(nm, nt0, nx).swapaxes(0, 1)
             if returnres:
-                datar = datar.reshape(n_lins, ntheta, nt0, nx).squeeze().swapaxes(0 + multi, 1 + multi)
+                datar = (
+                    datar.reshape(n_lins, ntheta, nt0, nx)
+                    .squeeze()
+                    .swapaxes(0 + multi, 1 + multi)
+                )
         else:
             minv = minv.reshape(nt0, nm, nx)
             if returnres:
@@ -613,7 +743,11 @@ def PrestackInversion(data, theta, wav, m0=None, linearization='akirich',
         if explicit:
             minv = minv.reshape(nm, nt0, nx, ny).swapaxes(0, 1)
             if returnres:
-                datar = datar.reshape(n_lins, ntheta, nt0, nx, ny).squeeze().swapaxes(0 + multi, 1 + multi)
+                datar = (
+                    datar.reshape(n_lins, ntheta, nt0, nx, ny)
+                    .squeeze()
+                    .swapaxes(0 + multi, 1 + multi)
+                )
         else:
             minv = minv.reshape(nt0, nm, nx, ny)
             if returnres:

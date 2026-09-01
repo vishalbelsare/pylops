@@ -1,0 +1,76 @@
+__all__ = ["Flip"]
+
+
+import numpy as np
+
+from pylops import LinearOperator
+from pylops.utils._internal import _value_or_sized_to_tuple
+from pylops.utils.decorators import reshaped
+from pylops.utils.typing import DTypeLike, InputDimsLike, NDArray
+
+
+class Flip(LinearOperator):
+    r"""Flip along an axis.
+
+    Flip a multi-dimensional array along ``axis``.
+
+    Parameters
+    ----------
+    dims : :obj:`list` or :obj:`int`
+        Number of samples for each dimension
+    axis : :obj:`int`, optional
+        .. versionadded:: 2.0.0
+
+        Axis along which model is flipped.
+    dtype : :obj:`str`, optional
+        Type of elements in input array.
+    name : :obj:`str`, optional
+        .. versionadded:: 2.0.0
+
+        Name of operator (to be used by :func:`pylops.utils.describe.describe`)
+
+    Attributes
+    ----------
+    dims : :obj:`tuple`
+        Shape of the array after the adjoint, but before flattening.
+
+        For example, ``x_reshaped = (Op.H * y.ravel()).reshape(Op.dims)``.
+    dimsd : :obj:`tuple`
+        Shape of the array after the forward, but before flattening. In
+        this case, same as ``dims``.
+    shape : :obj:`tuple`
+        Operator shape.
+
+    Notes
+    -----
+    The Flip operator flips the input model (and data) along any chosen
+    direction. For simplicity, given a one dimensional array,
+    in forward mode this is equivalent to:
+
+    .. math::
+        y[i] = x[N-1-i] \quad \forall i=0,1,2,\ldots,N-1
+
+    where :math:`N` is the dimension of the input model along ``axis``. As this operator is
+    self-adjoint, :math:`x` and :math:`y` in the equation above are simply
+    swapped in adjoint mode.
+
+    """
+
+    def __init__(
+        self,
+        dims: int | InputDimsLike,
+        axis: int = -1,
+        dtype: DTypeLike = "float64",
+        name: str = "F",
+    ) -> None:
+        dims = _value_or_sized_to_tuple(dims)
+        super().__init__(dtype=np.dtype(dtype), dims=dims, dimsd=dims, name=name)
+        self.axis = axis
+
+    @reshaped(swapaxis=True)
+    def _matvec(self, x: NDArray) -> NDArray:
+        y = np.flip(x, axis=-1)
+        return y
+
+    def _rmatvec(self, x: NDArray) -> NDArray:
+        return self._matvec(x)

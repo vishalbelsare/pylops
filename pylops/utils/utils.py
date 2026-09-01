@@ -1,12 +1,18 @@
+__all__ = ["Report"]
+
 # scooby is a soft dependency for pylops
+
 try:
     from scooby import Report as ScoobyReport
 except ImportError:
+
     class ScoobyReport:
         def __init__(self, additional, core, optional, ncol, text_width, sort):
-            print("\nNOTE: `pylops.Report` requires `scooby`. Install it via"
-                  "\n      `pip install scooby` or "
-                  "`conda install -c conda-forge scooby`.\n")
+            print(
+                "\nNOTE: `pylops.Report` requires `scooby`. Install it via"
+                "\n      `pip install scooby` or "
+                "`conda install -c conda-forge scooby`.\n"
+            )
 
 
 class Report(ScoobyReport):
@@ -58,14 +64,26 @@ class Report(ScoobyReport):
 
     """
 
-    def __init__(self, add_pckg=None, ncol=3, text_width=80, sort=False):
+    def __init__(
+        self,
+        add_pckg: list | None = None,
+        ncol: int = 3,
+        text_width: int = 80,
+        sort: bool = False,
+    ) -> None:
         """Initiate a scooby.Report instance."""
 
         # Mandatory packages.
-        core = ['numpy', 'scipy', 'pylops']
+        core = ["numpy", "scipy", "pylops"]
 
         # Optional packages.
-        optional = ['IPython', 'matplotlib', 'numba']
+        optional = ["IPython", "matplotlib", "numba"]
 
-        super().__init__(additional=add_pckg, core=core, optional=optional,
-                         ncol=ncol, text_width=text_width, sort=sort)
+        super().__init__(
+            additional=add_pckg,
+            core=core,
+            optional=optional,
+            ncol=ncol,
+            text_width=text_width,
+            sort=sort,
+        )

@@ -1,7 +1,7 @@
 .. _api:
 
-PyLops API
-==========
+|:wrench:| PyLops API
+=====================
 
 The Application Programming Interface (API) of PyLops can be loosely seen
 as composed of a stack of three main layers:
@@ -28,6 +28,9 @@ Templates
     LinearOperator
     FunctionOperator
     MemoizeOperator
+    PyTensorOperator
+    TorchOperator
+    JaxOperator
 
 Basic operators
 ~~~~~~~~~~~~~~~
@@ -60,6 +63,8 @@ Basic operators
     Real
     Imag
     Conj
+    ToCupy
+
 
 Smoothing and derivatives
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -69,6 +74,7 @@ Smoothing and derivatives
 
    Smoothing1D
    Smoothing2D
+   SmoothingND
    FirstDerivative
    SecondDerivative
    Laplacian
@@ -88,7 +94,13 @@ Signal processing
     Convolve1D
     Convolve2D
     ConvolveND
+    NonStationaryConvolve1D
+    NonStationaryConvolve2D
+    NonStationaryConvolve3D
+    NonStationaryFilters1D
+    NonStationaryFilters2D
     Interp
+    InterpCubicSpline
     Bilinear
     FFT
     FFT2D
@@ -96,15 +108,24 @@ Signal processing
     Shift
     DWT
     DWT2D
+    DWTND
+    DCT
+    DTCWT
     Seislet
+    UDCT
     Radon2D
     Radon3D
+    FourierRadon2D
+    FourierRadon3D
     ChirpRadon2D
     ChirpRadon3D
+    PWSprayer2D
+    PWSmoother2D
     Sliding1D
     Sliding2D
     Sliding3D
     Patch2D
+    Patch3D
     Fredholm1
 
 
@@ -119,9 +140,13 @@ Wave-Equation processing
     PressureToVelocity
     UpDownComposition2D
     UpDownComposition3D
+    BlendingContinuous
+    BlendingGroup
+    BlendingHalf
     MDC
     PhaseShift
-    Demigration
+    Kirchhoff
+    AcousticWave2D
 
 
 Geophysical subsurface characterization
@@ -138,47 +163,113 @@ Geophysical subsurface characterization
     prestack.PrestackWaveletModelling
 
 
+Medical imaging
+~~~~~~~~~~~~~~~
+
+.. currentmodule:: pylops.medical
+
+.. autosummary::
+   :toctree: generated/
+
+    CT2D
+    MRI2D
+
+
 Solvers
 -------
+Template
+~~~~~~~~
+.. currentmodule:: pylops.optimization.basesolver
+
+.. autosummary::
+   :toctree: generated/
+
+    Solver
 
 Basic
 ~~~~~
 
-.. currentmodule:: pylops.optimization
+.. currentmodule:: pylops.optimization.cls_basic
 
 .. autosummary::
    :toctree: generated/
 
-    solver.cg
-    solver.cgls
-    solver.lsqr
+    CG
+    CGLS
+    LSQR
+
+.. currentmodule:: pylops.optimization.basic
+
+.. autosummary::
+   :toctree: generated/
+
+    cg
+    cgls
+    lsqr
 
 Least-squares
 ~~~~~~~~~~~~~
 
-.. currentmodule:: pylops.optimization
+.. currentmodule:: pylops.optimization.cls_leastsquares
 
 .. autosummary::
    :toctree: generated/
 
-    leastsquares.NormalEquationsInversion
-    leastsquares.RegularizedInversion
-    leastsquares.PreconditionedInversion
+    NormalEquationsInversion
+    RegularizedInversion
+    PreconditionedInversion
+
+
+.. currentmodule:: pylops.optimization.leastsquares
+
+.. autosummary::
+   :toctree: generated/
+
+    normal_equations_inversion
+    regularized_inversion
+    preconditioned_inversion
 
 
 Sparsity
 ~~~~~~~~
 
+.. currentmodule:: pylops.optimization.cls_sparsity
+
 .. autosummary::
    :toctree: generated/
 
-    sparsity.IRLS
-    sparsity.OMP
-    sparsity.ISTA
-    sparsity.FISTA
-    sparsity.SPGL1
-    sparsity.SplitBregman
+    IRLS
+    OMP
+    ISTA
+    FISTA
+    SPGL1
+    SplitBregman
 
+.. currentmodule:: pylops.optimization.sparsity
+
+.. autosummary::
+   :toctree: generated/
+
+    irls
+    omp
+    ista
+    fista
+    spgl1
+    splitbregman
+
+Callbacks
+~~~~~~~~~
+
+.. currentmodule:: pylops.optimization.callback
+
+.. autosummary::
+   :toctree: generated/
+
+    Callbacks
+    CostNanInfCallback
+    CostToDataCallback
+    CostToInitialCallback
+    MetricsCallback
 
 
 Applications

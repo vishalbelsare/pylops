@@ -1,57 +1,19 @@
-import logging
+__all__ = [
+    "PhaseShift",
+    "Deghosting",
+]
+
+from collections.abc import Callable, Sequence
+
 import numpy as np
-
 from scipy.sparse.linalg import lsqr
-from pylops import LinearOperator
-from pylops.utils.tapers import taper2d, taper3d
-from pylops.utils import dottest as Dottest
-from pylops import Diagonal, Identity, Pad
+
+from pylops import Diagonal, Identity, LinearOperator, Pad, aslinearoperator
 from pylops.signalprocessing import FFT
+from pylops.utils import dottest as Dottest
 from pylops.utils.backend import to_cupy_conditional
-
-
-logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.WARNING)
-
-
-def _phase_shift(phiin, freq, kx, vel, dz, ky=0, adj=False):
-    """Phase shift extrapolation for single depth level in 2d/3d constant
-    velocity medium
-
-    Parameters
-    ----------
-    phiin : :obj:`numpy.ndarray`
-        Frequency-wavenumber spectrum of input wavefield
-        (only positive frequencies)
-    freq : :obj:`numpy.ndarray`
-        Positive frequency axis (already gridded with kx)
-    kx : :obj:`int`, optional
-        Horizontal wavenumber first axis (already gridded with freq)
-    ky : :obj:`int`, optional
-        Horizontal wavenumber second axis (already gridded with freq). If ``0``
-        is provided, this reduces to phase shift in a 2d medium.
-    vel : :obj:`float`, optional
-        Constant propagation velocity.
-    dz : :obj:`float`, optional
-        Depth step.
-
-    Returns
-    ----------
-    phiin : :obj:`numpy.ndarray`
-        Frequency-wavenumber spectrum of depth extrapolated wavefield
-        (only positive frequencies)
-
-    """
-    # vertical slowness
-    kz = ((freq / vel) ** 2 - kx ** 2 - ky ** 2)
-    kz = np.sqrt(kz.astype(phiin.dtype))
-    # ensure evanescent region is complex positive
-    kz = np.real(kz) - 1j * np.sign(dz) * np.abs(np.imag(kz))
-    # create and apply propagator
-    gazx = np.exp(-1j * 2 * np.pi * dz * kz)
-    if adj:
-        gazx = np.conj(gazx)
-    phiout = phiin * gazx
-    return phiout
+from pylops.utils.tapers import taper2d, taper3d
+from pylops.utils.typing import DTypeLike, NDArray, Tfftengine_nsf
 
 
 class _PhaseShift(LinearOperator):
@@ -62,49 +24,71 @@ class _PhaseShift(LinearOperator):
     input parameters.
 
     """
-    def __init__(self, vel, dz, freq, kx, ky=None, dtype='complex64'):
+
+    def __init__(
+        self,
+        vel: float,
+        dz: float,
+        freq: NDArray,
+        kx: NDArray,
+        ky: int | NDArray | None = None,
+        dtype: str = "complex64",
+    ) -> None:
         self.vel = vel
         self.dz = dz
         # define frequency and horizontal wavenumber axes
         if ky is None:
             ky = 0
-            [freq, kx] = np.meshgrid(freq, kx, indexing='ij')
+            [freq, kx] = np.meshgrid(freq, kx, indexing="ij")
         else:
-            [freq, kx, ky] = \
-                np.meshgrid(freq, kx, ky, indexing='ij')
+            [freq, kx, ky] = np.meshgrid(freq, kx, ky, indexing="ij")
         # define vertical wavenumber axis
-        kz = ((freq / vel) ** 2 - kx ** 2 - ky ** 2)
+        kz = (freq / vel) ** 2 - kx**2 - ky**2
         kz = np.sqrt(kz.astype(dtype))
         # ensure evanescent region is complex positive
         kz = np.real(kz) - 1j * np.sign(dz) * np.abs(np.imag(kz))
         # create propagator
         self.gazx = np.exp(-1j * 2 * np.pi * dz * kz)
 
-        self.dims = freq.shape
-        self.shape = (np.prod(freq.shape), np.prod(freq.shape))
-        self.dtype = np.dtype(dtype)
-        self.explicit = False
+        super().__init__(
+            dtype=np.dtype(dtype),
+            dims=freq.shape,
+            dimsd=freq.shape,
+            explicit=False,
+            name="P",
+        )
 
-    def _matvec(self, x):
+    def _matvec(self, x: NDArray) -> NDArray:
         if not isinstance(self.gazx, type(x)):
             self.gazx = to_cupy_conditional(x, self.gazx)
         y = x.reshape(self.dims) * self.gazx
         return y.ravel()
 
-    def _rmatvec(self, x):
+    def _rmatvec(self, x: NDArray) -> NDArray:
         if not isinstance(self.gazx, type(x)):
             self.gazx = to_cupy_conditional(x, self.gazx)
         y = x.reshape(self.dims) * np.conj(self.gazx)
         return y.ravel()
 
 
-def PhaseShift(vel, dz, nt, freq, kx, ky=None, dtype='float64'):
+def PhaseShift(
+    vel: float,
+    dz: float,
+    nt: int,
+    freq: NDArray,
+    kx: NDArray,
+    ky: NDArray | None = None,
+    dtype: DTypeLike = "float64",
+    name: str = "P",
+    fftengine: Tfftengine_nsf = "numpy",
+    **kwargs_fft,
+) -> LinearOperator:
     r"""Phase shift operator
 
     Apply positive (forward) phase shift with constant velocity in
     forward mode, and negative (backward) phase shift with constant velocity in
     adjoint mode. Input model and data should be 2- or 3-dimensional arrays
-    in time-space domain of size :math:`[n_t \times n_x (\times n_y)]`.
+    in time-space domain of size :math:`[n_t \times n_x \;(\times n_y)]`.
 
     Parameters
     ----------
@@ -117,13 +101,26 @@ def PhaseShift(vel, dz, nt, freq, kx, ky=None, dtype='float64'):
     freq : :obj:`numpy.ndarray`
         Positive frequency axis
     kx : :obj:`int`, optional
-        Horizontal wavenumber axis (centered around 0) of size
+        Horizontal spectroscopic wavenumber axis (centered around 0) of size
         :math:`[n_x \times 1]`.
     ky : :obj:`int`, optional
-        Second horizontal wavenumber axis for 3d phase shift
+        Second horizontal spectroscopic wavenumber axis for 3d phase shift
         (centered around 0) of size :math:`[n_y \times 1]`.
     dtype : :obj:`str`, optional
         Type of elements in input array
+    name : :obj:`str`, optional
+        .. versionadded:: 2.0.0
+
+        Name of operator (to be used by :func:`pylops.utils.describe.describe`)
+    fftengine : :obj:`str`, optional
+        .. versionadded:: 2.6.0
+
+        Engine used for fft computation (``numpy``, ``scipy``, or ``fftw``). Choose
+        ``numpy`` when working with CuPy arrays.
+    **kwargs_fft
+        .. versionadded:: 2.6.0
+
+        Arbitrary keyword arguments to be passed to the selected fft method
 
     Returns
     -------
@@ -137,16 +134,21 @@ def PhaseShift(vel, dz, nt, freq, kx, ky=None, dtype='float64'):
     transformation to the input model:
 
     .. math::
-        d(f, k_x, k_y) = m(f, k_x, k_y) *
-        e^{-j \sqrt{\omega^2/v^2 - k_x^2 - k_y^2} \Delta z}
+        d(f, k_x, k_y) = m(f, k_x, k_y)
+        e^{-j \Delta z \sqrt{\omega^2/v^2 - k_x^2 - k_y^2}}
 
-    where :math:`v` is the constant propagation velocity and
-    :math:`\Delta z` is the propagation depth. In adjoint mode, the data is
-    propagated backward using the following transformation:
+    where :math:`v` is the constant propagation velocity,
+    :math:`\Delta z` is the propagation depth, :math:`\omega=2\pi f` is the
+    angular frequency axis (where :math:`f` is represented by ``freq``),
+    :math:`k_x=2\pi \tilde{k}_x` is the horizontal wavenumber (where
+    :math:`\tilde{k}_x` is represented by ``kx``), and :math:`k_y=2\pi \tilde{k}_y`
+    is the second horizontal wavenumber (where :math:`\tilde{k}_y`
+    is represented by ``ky``). In adjoint mode, the data is propagated backward
+    using the following transformation:
 
     .. math::
-        m(f, k_x, k_y) = d(f, k_x, k_y) *
-        e^{j \sqrt{\omega^2/v^2 - k_x^2 - k_y^2} \Delta z}
+        m(f, k_x, k_y) = d(f, k_x, k_y)
+        e^{j \Delta z \sqrt{\omega^2/v^2 - k_x^2 - k_y^2}}
 
     Effectively, the input model and data are assumed to be in time-space
     domain and forward Fourier transform is applied to both dimensions, leading
@@ -160,18 +162,29 @@ def PhaseShift(vel, dz, nt, freq, kx, ky=None, dtype='float64'):
 
     """
     dtypefft = (np.ones(1, dtype=dtype) + 1j * np.ones(1, dtype=dtype)).dtype
+    dims: tuple[int, int] | tuple[int, int, int]
+    dimsfft: tuple[int, int] | tuple[int, int, int]
     if ky is None:
         dims = (nt, kx.size)
         dimsfft = (freq.size, kx.size)
     else:
         dims = (nt, kx.size, ky.size)
         dimsfft = (freq.size, kx.size, ky.size)
-    Fop = FFT(dims, dir=0, nfft=nt, real=True, dtype=dtype)
-    Kxop = FFT(dimsfft, dir=1, nfft=kx.size, real=False,
-               fftshift=True, dtype=dtypefft)
+    Fop = FFT(dims, axis=0, nfft=nt, real=True, dtype=dtype)
+    Kxop = FFT(
+        dimsfft, axis=1, nfft=kx.size, real=False, ifftshift_before=True, dtype=dtypefft
+    )
     if ky is not None:
-        Kyop = FFT(dimsfft, dir=2, nfft=ky.size, real=False,
-                   fftshift=True, dtype=dtypefft)
+        Kyop = FFT(
+            dimsfft,
+            axis=2,
+            nfft=ky.size,
+            real=False,
+            ifftshift_before=True,
+            engine=fftengine,
+            dtype=dtypefft,
+            **kwargs_fft,
+        )
     Pop = _PhaseShift(vel, dz, freq, kx, ky, dtypefft)
     if ky is None:
         Pop = Fop.H * Kxop * Pop * Kxop.H * Fop
@@ -181,26 +194,46 @@ def PhaseShift(vel, dz, nt, freq, kx, ky=None, dtype='float64'):
     # We know this is correct because forward and inverse FFTs are applied at
     # the beginning and end of this combined operator
     Pop.dtype = dtype
-    return LinearOperator(Pop)
+    Pop = aslinearoperator(Pop)
+    Pop.name = name
+    return Pop
 
 
-def Deghosting(p, nt, nr, dt, dr, vel, zrec, pd=None, win=None,
-               npad=(11, 11), ntaper=(11, 11),
-               restriction=None, sptransf=None, solver=lsqr,
-               dottest=False, dtype='complex128', **kwargs_solver):
+def Deghosting(
+    p: NDArray,
+    nt: int,
+    nr: int | tuple[int, int],
+    dt: float,
+    dr: Sequence[float],
+    vel: float,
+    zrec: float,
+    kind: str | None = "p",
+    pd: NDArray | None = None,
+    win: NDArray | None = None,
+    npad: tuple[int] | tuple[int, int] = (11, 11),
+    ntaper: tuple[int, int] = (11, 11),
+    restriction: LinearOperator | None = None,
+    sptransf: LinearOperator | None = None,
+    solver: Callable = lsqr,
+    dottest: bool = False,
+    dtype: DTypeLike = "complex128",
+    **kwargs_solver,
+) -> tuple[NDArray, NDArray]:
     r"""Wavefield deghosting.
 
-    Apply seismic wavefield decomposition from single-component (pressure)
-    data. This process is also generally referred to as model-based deghosting.
+    Apply seismic wavefield decomposition from single-component (pressure or
+    vertical velocity) data. This process is also generally referred to as
+    model-based deghosting.
 
     Parameters
     ----------
-    p : :obj:`np.ndarray`
-        Pressure data of of size :math:`\lbrack n_{r_x} (\times n_{r_y})
-        \times n_t \rbrack` (or :math:`\lbrack n_{r_{x,sub}}
-        (\times n_{r_{y,sub}}) \times n_t \rbrack`
+    p : :obj:`numpy.ndarray`
+        Pressure (or vertical velocity) data of of size
+        :math:`\lbrack n_{r_x}\,(\times n_{r_y})
+        \times n_t \rbrack` (or :math:`\lbrack n_{r_{x,\text{sub}}}\,
+        (\times n_{r_{y,\text{sub}}}) \times n_t \rbrack`
         in case a ``restriction`` operator is provided. Note that
-        :math:`n_{r_{x,sub}}` (and :math:`n_{r_{y,sub}}`)
+        :math:`n_{r_{x,\text{sub}}}` (and :math:`n_{r_{y,\text{sub}}}`)
         must agree with the size of the output of this operator)
     nt : :obj:`int`
         Number of samples along the time axis
@@ -215,9 +248,13 @@ def Deghosting(p, nt, nr, dt, dr, vel, zrec, pd=None, win=None,
         Velocity along the receiver array (must be constant)
     zrec : :obj:`float`
         Depth of receiver array
-    pd : :obj:`np.ndarray`, optional
+    kind : :obj:`str`, optional
+        .. versionadded:: 2.3.0
+
+        Type of data (``p`` or ``vz``)
+    pd : :obj:`numpy.ndarray`, optional
         Direct arrival to be subtracted from ``p``
-    win : :obj:`np.ndarray`, optional
+    win : :obj:`numpy.ndarray`, optional
         Time window to be applied to ``p`` to remove the direct arrival
         (if ``pd=None``)
     ntaper : :obj:`float` or :obj:`tuple`, optional
@@ -243,37 +280,53 @@ def Deghosting(p, nt, nr, dt, dr, vel, zrec, pd=None, win=None,
 
     Returns
     -------
-    pup : :obj:`np.ndarray`
-        Up-going wavefield
-    pdown : :obj:`np.ndarray`
-        Down-going wavefield
+    pup : :obj:`numpy.ndarray`
+        Up-going pressure (or particle velocity) wavefield
+    pdown : :obj:`numpy.ndarray`
+        Down-going (or particle velocity) wavefield
+
+    Raises
+    ------
+    ValueError
+        If ``kind`` is not "p" or "vz".
 
     Notes
     -----
-    Up- and down-going components of seismic data (:math:`p^-(x, t)`
+    The up- and down-going components of a seismic data (:math:`p^-(x, t)`
     and :math:`p^+(x, t)`) can be estimated from single-component data
-    (:math:`p(x, t)`) using a ghost model.
+    :math:`p(x, t)` using a ghost model.
 
-    The basic idea is that of using a one-way propagator in the f-k domain
+    The basic idea [1]_ is that of using a one-way propagator in the f-k domain
     (also referred to as ghost model) to predict the down-going field
     from the up-going one (excluded the direct arrival and its source
     ghost referred here to as :math:`p_d(x, t)`):
 
     .. math::
-        p^+ - p_d = e^{-j k_z 2 z_{rec}} p^-
+        p^+ - p_d = e^{-j k_z 2 z_\text{rec}} p^-
 
-    where :math:`k_z` is the vertical wavenumber and :math:`z_{rec}` is the
+    where :math:`k_z` is the vertical wavenumber and :math:`z_\text{rec}` is the
     depth of the array of receivers
 
     In a matrix form we can thus write the total wavefield as:
 
     .. math::
-        \mathbf{p} - \mathbf{p_d} = (\mathbf{I} + \Phi) \mathbf{p}^-
+        \mathbf{p} - \mathbf{p_d} = (\mathbf{I} \pm \Phi) \mathbf{p}^-
 
     where :math:`\Phi` is one-way propagator implemented via the
-    :class:`pylops.waveeqprocessing.PhaseShift` operator.
+    :class:`pylops.waveeqprocessing.PhaseShift` operator. Note that :math:`+` is
+    used for the pressure data, whilst :math:`-` is used for the vertical velocity
+    data.
+
+    .. [1] Amundsen, L., 1993, Wavenumber-based filtering of marine point-source
+       data: GEOPHYSICS, 58, 1335–1348.
 
     """
+    # Check kind
+    if kind not in ["p", "vz"]:
+        msg = f"kind must be either 'p' or 'vz', got {kind}"
+        raise ValueError(msg)
+
+    # Identify dimensions
     ndims = p.ndim
     if ndims == 2:
         dims = (nt, nr)
@@ -300,11 +353,19 @@ def Deghosting(p, nt, nr, dt, dr, vel, zrec, pd=None, win=None,
         taper = taper3d(nt, nr, ntaper).transpose(2, 0, 1)
         Padop = Pad(dims, ((0, 0), (npad[0], npad[0]), (npad[1], npad[1])))
 
-    Pop = - Padop.H * PhaseShift(vel, zprop, nt, freq, kx, ky) * \
-          Padop * Diagonal(taper.ravel(), dtype=dtype)
+    Pop = (
+        -Padop.H
+        * PhaseShift(vel, zprop, nt, freq, kx, ky)
+        * Padop
+        * Diagonal(taper.ravel(), dtype=dtype)
+    )
 
     # Decomposition operator
-    Dupop = (Identity(nt * nrs, dtype=p.dtype) + Pop)
+    if kind == "p":
+        Dupop = Identity(nt * nrs, dtype=p.dtype) + Pop
+    else:
+        Dupop = Identity(nt * nrs, dtype=p.dtype) - Pop
+
     if dottest:
         Dottest(Dupop, nt * nrs, nt * nrs, verb=True)
 
@@ -329,7 +390,7 @@ def Deghosting(p, nt, nr, dt, dr, vel, zrec, pd=None, win=None,
 
     # Apply sparse transform
     if sptransf is not None:
-        p = Dupop_norestr * pup # reconstruct p at finely sampled spatial axes
+        p = Dupop_norestr * pup  # reconstruct p at finely sampled spatial axes
         pup = sptransf * pup
         p = np.real(p).reshape(dims)
 
